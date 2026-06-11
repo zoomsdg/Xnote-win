@@ -37,19 +37,46 @@ public sealed class ImageEditBlockVM : EditBlockVM
     public ImageSource? Image => _image ??= ImageLoader.Load(Path);
 }
 
+public sealed class AudioEditBlockVM : EditBlockVM
+{
+    /// <summary>本地媒体文件绝对路径（已在 media 目录内）。</summary>
+    public string Path { get; init; } = "";
+    public long? Duration { get; init; }
+
+    private bool _isPlaying;
+    public bool IsPlaying
+    {
+        get => _isPlaying;
+        set { _isPlaying = value; Raise(nameof(IsPlaying)); Raise(nameof(PlayLabel)); }
+    }
+
+    public string PlayLabel => (_isPlaying ? "⏹ 停止 " : "▶ 播放 ") + DisplayDuration;
+
+    public string DisplayDuration
+    {
+        get
+        {
+            if (Duration is not > 0) return "";
+            var t = System.TimeSpan.FromMilliseconds(Duration.Value);
+            return $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
+        }
+    }
+}
+
 public static class ImageLoader
 {
-    /// <summary>用 OnLoad 缓存加载，避免锁定源文件。</summary>
+    /// <summary>解密后从内存流加载（OnLoad 缓存，不锁定文件）。</summary>
     public static ImageSource? Load(string? path)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
         try
         {
+            using var ms = new MemoryStream(MediaAccess.ReadPlain(path));
             var bmp = new BitmapImage();
             bmp.BeginInit();
             bmp.CacheOption = BitmapCacheOption.OnLoad;
             bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
-            bmp.UriSource = new System.Uri(path);
+            bmp.StreamSource = ms;
             bmp.EndInit();
             bmp.Freeze();
             return bmp;
@@ -57,13 +84,13 @@ public static class ImageLoader
         catch { return null; }
     }
 
-    /// <summary>读取图片像素尺寸。</summary>
+    /// <summary>读取图片像素尺寸（从解密后的字节）。</summary>
     public static (int w, int h) Dimensions(string path)
     {
         try
         {
-            using var fs = File.OpenRead(path);
-            var frame = BitmapFrame.Create(fs, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
+            using var ms = new MemoryStream(MediaAccess.ReadPlain(path));
+            var frame = BitmapFrame.Create(ms, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
             return (frame.PixelWidth, frame.PixelHeight);
         }
         catch { return (0, 0); }

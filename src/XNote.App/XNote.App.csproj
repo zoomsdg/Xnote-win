@@ -4,6 +4,10 @@
     <ProjectReference Include="..\XNote.Core\XNote.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>

@@ -65,6 +65,23 @@
                                 </DockPanel>
                             </Border>
                         </DataTemplate>
+                        <!-- 音频块 -->
+                        <DataTemplate DataType="{x:Type local:AudioEditBlockVM}">
+                            <Border Margin="2,4" Padding="4" Background="#FFFAFAFA" CornerRadius="4">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right" VerticalAlignment="Top">
+                                        <Button Content="▲" Click="MoveUp_Click" Width="26" MinWidth="26" Padding="0" Margin="1"/>
+                                        <Button Content="▼" Click="MoveDown_Click" Width="26" MinWidth="26" Padding="0" Margin="1"/>
+                                        <Button Content="✕" Click="DeleteBlock_Click" Width="26" MinWidth="26" Padding="0" Margin="1"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="{Binding PlayLabel}" Click="PlayAudio_Click" MinWidth="120"/>
+                                        <TextBlock Text="🎵 音频" Foreground="{StaticResource Muted}"
+                                                   VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
                     </ItemsControl.Resources>
                 </ItemsControl>
             </ScrollViewer>
@@ -75,6 +92,8 @@
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                 <Button Content="＋ 文本" Click="AddText_Click"/>
                 <Button Content="＋ 图片" Click="AddImage_Click"/>
+                <Button x:Name="RecordBtn" Content="● 录音" Click="Record_Click"/>
+                <TextBlock x:Name="RecordStatus" Foreground="Red" VerticalAlignment="Center" Margin="8,0,0,0"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="保存" Click="Save_Click" Background="{StaticResource Accent}" Foreground="White"/>

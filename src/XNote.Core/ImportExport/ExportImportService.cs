@@ -36,14 +36,19 @@ public sealed class ExportImportService
         public required IReadOnlyDictionary<string, string> CategoryNameById { get; init; }
     }
 
-    /// <summary>把记事导出为加密 ZIP。block.Url 必须指向本地明文媒体文件。</summary>
+    /// <summary>
+    /// 把记事导出为加密 ZIP。<paramref name="mediaReader"/> 负责把 block.Url 指向的本地媒体
+    /// 读成明文字节（默认直接读文件；上层可传入解密读取）。
+    /// </summary>
     public void Export(
         IReadOnlyList<FullNote> notes,
         IReadOnlyDictionary<string, string> categoryNameById,
         string password,
         string outputZipPath,
-        IProgress<string>? progress = null)
+        IProgress<string>? progress = null,
+        Func<string, byte[]>? mediaReader = null)
     {
+        var readMedia = mediaReader ?? File.ReadAllBytes;
         if (string.IsNullOrEmpty(password))
             throw new ArgumentException("导出密码不能为空", nameof(password));
 
@@ -128,7 +133,7 @@ public sealed class ExportImportService
 
         WriteEntry(zip, DataEntryName, json);
         foreach (var (entryName, sourcePath) in mediaToWrite)
-            WriteEntry(zip, MediaPrefix + entryName, File.ReadAllBytes(sourcePath));
+            WriteEntry(zip, MediaPrefix + entryName, readMedia(sourcePath));
 
         zip.Finish();
         progress?.Report("导出完成！");

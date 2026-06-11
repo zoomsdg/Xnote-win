@@ -14,6 +14,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        MediaAccess.Store = _store.Media; // 注入加密媒体访问点
         ReloadCategories();
         Refresh();
     }

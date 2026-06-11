@@ -4,10 +4,13 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- DPAPI（ProtectedData）是 Windows-only API；本产品仅在 Windows 运行，关闭平台告警 -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="SharpZipLib" Version="1.4.2" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 
 </Project>

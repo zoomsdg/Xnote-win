@@ -94,6 +94,22 @@ static int RoundTrip()
     Check("store.category", store.CategoryName(stored.Note.CategoryId), "工作");
     Console.WriteLine("[OK] LocalStore 端到端导入成功");
 
+    // 静态加密：落盘媒体应被 DPAPI 加密，但解密读回与原图一致
+    var storedImg = stored.Blocks.First(b => b.Type == BlockType.Image);
+    if (!XNote.Core.Storage.MediaCryptor.IsEncrypted(storedImg.Url!)) return Fail("落盘媒体未加密");
+    Console.WriteLine("[OK] 落盘媒体已加密 (XNW1)");
+    if (!store.Media.ReadPlain(storedImg.Url!).SequenceEqual(imgBytes)) return Fail("解密读回与原图不一致");
+    Console.WriteLine("[OK] 解密读回与原图一致");
+
+    // 从“加密落盘”再导出 → 新库导入，图片字节仍一致（证明导出会解密成明文写入 ZIP）
+    var zip2 = Path.Combine(work, "reexport.zip");
+    store.ExportAll(pwd, zip2);
+    var store2 = new LocalStore(new AppPaths(Path.Combine(work, "store2")));
+    store2.Import(zip2, pwd);
+    var img2 = store2.ListNotes().Single().Blocks.First(b => b.Type == BlockType.Image);
+    if (!store2.Media.ReadPlain(img2.Url!).SequenceEqual(imgBytes)) return Fail("再导出往返图片不一致");
+    Console.WriteLine("[OK] 加密落盘 → 再导出 → 再导入 图片字节一致");
+
     try { Directory.Delete(work, true); } catch { }
     Console.WriteLine("\n== 全部通过 ✅ ==");
     return 0;

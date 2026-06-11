@@ -15,6 +15,7 @@ public sealed class LocalStore
 {
     private readonly AppPaths _paths;
     private readonly ExportImportService _io = new();
+    private readonly MediaStore _media;
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
     private readonly List<FullNote> _notes = new();
@@ -26,8 +27,13 @@ public sealed class LocalStore
     public LocalStore(AppPaths? paths = null)
     {
         _paths = paths ?? AppPaths.Default;
+        _media = new MediaStore(_paths);
+        _media.CleanupTemp();
         Load();
     }
+
+    /// <summary>媒体访问点（加密读写 / 解密到临时文件）。</summary>
+    public MediaStore Media => _media;
 
     // ---------- 加载 / 持久化 ----------
 
@@ -167,15 +173,13 @@ public sealed class LocalStore
         SaveNotes();
     }
 
-    /// <summary>把外部媒体文件复制进 media 目录，返回新文件绝对路径。</summary>
+    /// <summary>在 temp 目录内预留一个新文件路径（用于录音等先写明文、再加密入库的场景）。</summary>
+    public string ReserveTempPath(string ext)
+        => Path.Combine(_paths.TempDir, "rec_" + Guid.NewGuid().ToString("N") + ext);
+
+    /// <summary>把外部明文媒体文件加密存入 media 目录，返回加密文件绝对路径。</summary>
     public string ImportMediaFile(string sourcePath, bool isImage)
-    {
-        var ext = Path.GetExtension(sourcePath);
-        var prefix = isImage ? "image" : "audio";
-        var dest = Path.Combine(_paths.MediaDir, $"{prefix}_{Guid.NewGuid()}{ext}");
-        File.Copy(sourcePath, dest, overwrite: true);
-        return dest;
-    }
+        => _media.SaveFromFile(sourcePath, isImage);
 
     private void TryDeleteMedia(string? path)
     {
@@ -246,7 +250,8 @@ public sealed class LocalStore
         IProgress<string>? progress = null)
     {
         var nameById = _categories.ToDictionary(c => c.Id, c => c.Name);
-        _io.Export(notes, nameById, password, outputZipPath, progress);
+        // 导出读取媒体时解密成明文写入 ZIP（跨平台 ZIP 内一律明文）
+        _io.Export(notes, nameById, password, outputZipPath, progress, _media.ReadPlain);
     }
 
     public void ExportAll(string password, string outputZipPath, IProgress<string>? progress = null)

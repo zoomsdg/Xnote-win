@@ -13,12 +13,16 @@ public partial class NoteEditWindow : Window
     private readonly LocalStore _store;
     private readonly FullNote _note;
     private readonly ObservableCollection<EditBlockVM> _blocks = new();
+    private readonly Audio.AudioPlaybackService _player = new();
+    private readonly Audio.AudioRecorder _recorder = new();
 
     public NoteEditWindow(LocalStore store, FullNote note)
     {
         InitializeComponent();
         _store = store;
         _note = note;
+
+        _player.PlayingChanged += OnPlayingChanged;
 
         TitleBox.Text = note.Note.Title;
         PinCheck.IsChecked = note.Note.IsPinned;
@@ -44,7 +48,7 @@ public partial class NoteEditWindow : Window
         {
             SourceId = b.Id, Path = b.Url ?? "", Alt = b.Alt, Width = b.Width, Height = b.Height
         },
-        BlockType.Audio => new TextEditBlockVM { SourceId = b.Id, Text = "[音频块：当前版本暂不支持播放]" },
+        BlockType.Audio => new AudioEditBlockVM { SourceId = b.Id, Path = b.Url ?? "", Duration = b.Duration },
         _ => new TextEditBlockVM { SourceId = b.Id, Text = b.Text ?? "" }
     };
 
@@ -136,6 +140,14 @@ public partial class NoteEditWindow : Window
                         Url = im.Path, Alt = im.Alt, Width = im.Width, Height = im.Height
                     });
                     break;
+                case AudioEditBlockVM au:
+                    newBlocks.Add(new NoteBlock
+                    {
+                        Id = vm.SourceId ?? System.Guid.NewGuid().ToString(),
+                        NoteId = _note.Note.Id, Type = BlockType.Audio, Order = order++,
+                        Url = au.Path, Duration = au.Duration
+                    });
+                    break;
             }
         }
         _note.Blocks = newBlocks;
@@ -145,4 +157,64 @@ public partial class NoteEditWindow : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+
+    // ---------- 音频 ----------
+
+    private void Record_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_recorder.IsRecording)
+        {
+            try
+            {
+                // 先录到 temp 明文，停止时再加密入库
+                var path = _store.ReserveTempPath(".wav");
+                _recorder.Start(path);
+                RecordBtn.Content = "⏹ 停止录音";
+                RecordStatus.Text = "● 录音中…";
+            }
+            catch (System.Exception ex)
+            {
+                MessageBox.Show(this, "无法开始录音（请检查麦克风）：\n" + ex.Message,
+                    "录音失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        else
+        {
+            var (path, dur) = _recorder.Stop();
+            RecordBtn.Content = "● 录音";
+            RecordStatus.Text = "";
+            if (!string.IsNullOrEmpty(path) && System.IO.File.Exists(path))
+            {
+                // 加密入库，删除明文临时录音
+                var encPath = _store.ImportMediaFile(path, isImage: false);
+                try { System.IO.File.Delete(path); } catch { /* ignore */ }
+                _blocks.Add(new AudioEditBlockVM { Path = encPath, Duration = dur });
+            }
+        }
+    }
+
+    private void PlayAudio_Click(object sender, RoutedEventArgs e)
+    {
+        if (BlockOf(sender) is not AudioEditBlockVM vm) return;
+        if (string.IsNullOrEmpty(vm.Path) || !System.IO.File.Exists(vm.Path))
+        {
+            MessageBox.Show(this, "音频文件缺失。", "播放", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        _player.Toggle(vm.Path);
+    }
+
+    private void OnPlayingChanged(string? path)
+    {
+        foreach (var vm in _blocks.OfType<AudioEditBlockVM>())
+            if (vm.Path == path)
+                vm.IsPlaying = _player.CurrentPath == path;
+    }
+
+    protected override void OnClosed(System.EventArgs e)
+    {
+        _player.Stop();
+        _recorder.Dispose();
+        base.OnClosed(e);
+    }
 }
