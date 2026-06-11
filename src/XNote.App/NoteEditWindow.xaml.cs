@@ -94,6 +94,17 @@ public partial class NoteEditWindow : Window
         _blocks.Remove(vm);
     }
 
+    private void ViewImage_Click(object sender, RoutedEventArgs e)
+    {
+        if (BlockOf(sender) is not ImageEditBlockVM vm) return;
+        if (string.IsNullOrEmpty(vm.Path) || !System.IO.File.Exists(vm.Path))
+        {
+            MessageBox.Show(this, "图片文件缺失。", "查看", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        new ImageViewerWindow(vm.Path) { Owner = this }.ShowDialog();
+    }
+
     private void AddText_Click(object sender, RoutedEventArgs e) => _blocks.Add(new TextEditBlockVM());
 
     private void AddImage_Click(object sender, RoutedEventArgs e)

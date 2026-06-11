@@ -57,7 +57,9 @@
                                         <Button Content="✕" Click="DeleteBlock_Click" Width="26" MinWidth="26" Padding="0" Margin="1"/>
                                     </StackPanel>
                                     <StackPanel>
-                                        <Image Source="{Binding Image}" MaxHeight="280" HorizontalAlignment="Left" Stretch="Uniform"/>
+                                        <Image Source="{Binding Image}" MaxHeight="280" HorizontalAlignment="Left"
+                                               Stretch="Uniform" Cursor="Hand" ToolTip="单击查看大图 / 保存"
+                                               MouseLeftButtonUp="ViewImage_Click"/>
                                         <TextBox Text="{Binding Alt, UpdateSourceTrigger=PropertyChanged}" FontSize="11"
                                                  Foreground="{StaticResource Muted}" BorderThickness="0" Background="Transparent"
                                                  Margin="0,2,0,0"/>
