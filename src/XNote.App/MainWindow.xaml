@@ -1,0 +1,69 @@
+<Window x:Class="XNote.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="纪事 XNote" Height="680" Width="1000"
+        WindowStartupLocation="CenterScreen">
+    <DockPanel>
+        <!-- 顶部工具栏 -->
+        <Border DockPanel.Dock="Top" Background="#FFF7F9FC" Padding="10,8" BorderBrush="#FFE0E0E0" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button Content="＋ 新建" Click="New_Click" DockPanel.Dock="Left" Background="{StaticResource Accent}" Foreground="White"/>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button Content="导入" Click="Import_Click"/>
+                    <Button Content="导出全部" Click="ExportAll_Click"/>
+                    <Button Content="管理分类" Click="ManageCategories_Click"/>
+                </StackPanel>
+                <ComboBox x:Name="CategoryFilter" Width="130" Margin="10,0" DisplayMemberPath="Name"
+                          SelectedValuePath="Id" SelectionChanged="Filter_Changed" VerticalContentAlignment="Center"/>
+                <TextBox x:Name="SearchBox" TextChanged="Filter_Changed" VerticalContentAlignment="Center" Padding="4"
+                         ToolTip="搜索标题或正文（支持 2025 / 202503 / 20250315 日期）"/>
+            </DockPanel>
+        </Border>
+
+        <!-- 状态栏 -->
+        <Border DockPanel.Dock="Bottom" Background="#FFF7F9FC" Padding="10,4" BorderBrush="#FFE0E0E0" BorderThickness="0,1,0,0">
+            <TextBlock x:Name="StatusText" Foreground="{StaticResource Muted}" Text="就绪"/>
+        </Border>
+
+        <!-- 列表 -->
+        <ListBox x:Name="NoteList" BorderThickness="0" HorizontalContentAlignment="Stretch"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 MouseDoubleClick="NoteList_DoubleClick">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Padding" Value="4"/>
+                </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="编辑" Click="Edit_Click"/>
+                    <MenuItem Header="置顶 / 取消置顶" Click="TogglePin_Click"/>
+                    <MenuItem Header="导出选中" Click="ExportSelected_Click"/>
+                    <Separator/>
+                    <MenuItem Header="删除" Click="Delete_Click"/>
+                </ContextMenu>
+            </ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Border Padding="10,8" Margin="2" Background="White" CornerRadius="6" BorderBrush="#FFEDEDED" BorderThickness="1">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="📌" Visibility="{Binding PinVisibility}" Margin="0,0,4,0"/>
+                                <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="15" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding Preview}" Foreground="{StaticResource Muted}" Margin="0,4"
+                                       TextTrimming="CharacterEllipsis" MaxHeight="40" TextWrapping="Wrap"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Border Style="{StaticResource Chip}">
+                                    <TextBlock Text="{Binding CategoryName}" FontSize="11"/>
+                                </Border>
+                                <TextBlock Text="{Binding MediaText}" Foreground="{StaticResource Muted}" FontSize="11" Margin="8,0,0,0"/>
+                                <TextBlock Text="{Binding DateText}" Foreground="{StaticResource Muted}" FontSize="11" Margin="8,0,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+</Window>
