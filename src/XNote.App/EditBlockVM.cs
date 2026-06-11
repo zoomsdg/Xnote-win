@@ -65,21 +65,20 @@ public sealed class AudioEditBlockVM : EditBlockVM
 
 public static class ImageLoader
 {
-    /// <summary>解密后从内存流加载（OnLoad 缓存，不锁定文件）。</summary>
+    /// <summary>
+    /// 解密后从内存流加载（OnLoad 缓存，不锁定文件）。
+    /// 用 BitmapFrame.Create 而非 BitmapImage：后者配合 StreamSource + IgnoreImageCache
+    /// 会抛 ArgumentNullException('key')，导致图片不显示。
+    /// </summary>
     public static ImageSource? Load(string? path)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
         try
         {
             using var ms = new MemoryStream(MediaAccess.ReadPlain(path));
-            var bmp = new BitmapImage();
-            bmp.BeginInit();
-            bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
-            bmp.StreamSource = ms;
-            bmp.EndInit();
-            bmp.Freeze();
-            return bmp;
+            var frame = BitmapFrame.Create(ms, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+            if (frame.CanFreeze) frame.Freeze();
+            return frame;
         }
         catch { return null; }
     }
