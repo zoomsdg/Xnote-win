@@ -6,6 +6,62 @@ Android 版「纪事 / XNote」的 Windows 桌面重建版，使用 **.NET 8 + W
 > 本仓库是独立于 Android 工程的新仓库。Android 端逻辑参考自原 Kotlin 工程
 > （`ExportImportUtils.kt` / `NoteRepository.kt` 等），本项目按其产品逻辑重建。
 
+> ✅ 已实测：Android 与 Windows 两端可**互相导入**对方导出的纪事（双向验证通过）。
+
+---
+
+## 快速上手：启动与导入
+
+### 一、启动 Windows 版
+
+任选一种：
+
+**方式 A：双击已编译好的程序（最简单）**
+
+```
+d:\tools\xnote-win\src\XNote.App\bin\Debug\net8.0-windows\XNote.App.exe
+```
+
+直接双击启动。
+
+**方式 B：用命令启动**
+
+```powershell
+cd d:\tools\xnote-win
+& "C:\Program Files\dotnet\dotnet.exe" run --project src\XNote.App
+```
+
+> 想要一个可随意拷贝、不依赖项目目录、连 .NET 都不用装的独立 exe，发布一份即可：
+> ```powershell
+> & "C:\Program Files\dotnet\dotnet.exe" publish src\XNote.App -c Release -r win-x64 `
+>     --self-contained -p:PublishSingleFile=true -o d:\tools\xnote-win\publish
+> ```
+> 之后运行 `d:\tools\xnote-win\publish\XNote.App.exe`。
+
+### 二、导入安卓导出的纪事
+
+1. **在安卓上导出**：安卓「纪事」里导出，会在手机 `Download` 目录生成 `XNote_Export_*.zip`，记住设置的**导出密码**。
+2. **把 zip 拷到电脑**（数据线 / 微信传文件 / 网盘均可）。
+3. 启动 Windows 版 → 点顶部 **「导入」** 按钮。
+4. 选中那个 `XNote_Export_*.zip`。
+5. 输入安卓导出时设置的**密码** → 确定。
+6. 提示「成功导入 N 条纪事」后，列表即可看到（图片一并导入）。
+
+密码错误会提示「密码错误，无法解密」，换对密码重试即可。
+
+> 反向同理：Windows 里「导出全部 / 导出选中」生成的加密 ZIP，拷到安卓后用安卓「导入」即可读入。
+
+### 三、（可选）导入前先用命令行验证 zip
+
+不打开界面，先确认安卓的文件能被正确解析：
+
+```powershell
+cd d:\tools\xnote-win
+& "C:\Program Files\dotnet\dotnet.exe" run --project tools\XNote.Verify -- "C:\放zip的路径\XNote_Export_xxx.zip" 你的密码
+```
+
+会列出 zip 内条目与解析出的纪事条数/标题。这一步能读出来，界面里的「导入」就一定能成功。
+
 ---
 
 ## 跨平台备份格式（互通契约）
