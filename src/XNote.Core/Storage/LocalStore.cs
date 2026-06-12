@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using XNote.Core.ImportExport;
 using XNote.Core.Models;
@@ -8,8 +9,9 @@ namespace XNote.Core.Storage;
 /// 本地存储（JSON 文件 + media 目录）。负责记事/分类的增删改查、默认分类种子，
 /// 以及与 <see cref="ExportImportService"/> 协作完成导入/导出。
 ///
-/// 注意：Windows 端媒体在本地以明文存储（Android 端用 Keystore 加密落盘）。
-/// 这只影响“本机静态存储”，不影响跨平台互通——导出 ZIP 内两端都是明文媒体。
+/// 静态加密：纪事正文（notes.json）、分类（categories.json）与媒体均用 Windows DPAPI
+/// （CurrentUser）加密落盘（文件头 <c>XNW1</c>），读取时自动解密；历史明文文件可直接读入，
+/// 下次保存即自动迁移为加密。这只影响“本机静态存储”，不影响跨平台互通——导出 ZIP 内仍是约定明文格式。
 /// </summary>
 public sealed class LocalStore
 {
@@ -29,7 +31,21 @@ public sealed class LocalStore
         _paths = paths ?? AppPaths.Default;
         _media = new MediaStore(_paths);
         _media.CleanupTemp();
+        CleanupTemp();
         Load();
+    }
+
+    /// <summary>清理 temp 目录里遗留的录音临时文件与导入解压目录。</summary>
+    private void CleanupTemp()
+    {
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(_paths.TempDir, "rec_*"))
+                try { File.Delete(f); } catch { /* ignore */ }
+            foreach (var d in Directory.EnumerateDirectories(_paths.TempDir, "import_*"))
+                try { Directory.Delete(d, recursive: true); } catch { /* ignore */ }
+        }
+        catch { /* ignore */ }
     }
 
     /// <summary>媒体访问点（加密读写 / 解密到临时文件）。</summary>
@@ -44,24 +60,34 @@ public sealed class LocalStore
 
         if (File.Exists(_paths.NotesFile))
         {
-            var loaded = JsonSerializer.Deserialize<List<FullNote>>(File.ReadAllText(_paths.NotesFile));
+            var loaded = JsonSerializer.Deserialize<List<FullNote>>(ReadJson(_paths.NotesFile));
             if (loaded != null) _notes.AddRange(loaded);
         }
 
         if (File.Exists(_paths.CategoriesFile))
         {
-            var loaded = JsonSerializer.Deserialize<List<Category>>(File.ReadAllText(_paths.CategoriesFile));
+            var loaded = JsonSerializer.Deserialize<List<Category>>(ReadJson(_paths.CategoriesFile));
             if (loaded != null) _categories.AddRange(loaded);
         }
 
         EnsureDefaultCategories();
+
+        // 历史明文数据文件：启动时立即加密迁移
+        if (File.Exists(_paths.NotesFile) && !MediaCryptor.IsEncrypted(_paths.NotesFile)) SaveNotes();
+        if (File.Exists(_paths.CategoriesFile) && !MediaCryptor.IsEncrypted(_paths.CategoriesFile)) SaveCategories();
     }
 
-    private void SaveNotes() =>
-        File.WriteAllText(_paths.NotesFile, JsonSerializer.Serialize(_notes, JsonOpts));
+    /// <summary>读取并解密 JSON 数据文件（历史明文文件原样返回）。</summary>
+    private static string ReadJson(string path) =>
+        Encoding.UTF8.GetString(MediaCryptor.ReadPlain(path));
 
-    private void SaveCategories() =>
-        File.WriteAllText(_paths.CategoriesFile, JsonSerializer.Serialize(_categories, JsonOpts));
+    /// <summary>序列化并 DPAPI 加密写入 JSON 数据文件。</summary>
+    private static void WriteJson<T>(string path, T value) =>
+        MediaCryptor.EncryptToFile(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, JsonOpts)), path);
+
+    private void SaveNotes() => WriteJson(_paths.NotesFile, _notes);
+
+    private void SaveCategories() => WriteJson(_paths.CategoriesFile, _categories);
 
     private void EnsureDefaultCategories()
     {

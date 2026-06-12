@@ -86,13 +86,24 @@ static int RoundTrip()
     Console.WriteLine("[OK] 图片字节往返一致");
 
     // 顺带验证 LocalStore 端到端（独立数据目录）
-    var store = new LocalStore(new AppPaths(Path.Combine(work, "store")));
+    var storePaths = new AppPaths(Path.Combine(work, "store"));
+    var store = new LocalStore(storePaths);
     var n = store.Import(zipPath, pwd);
     if (n != 1) return Fail("LocalStore 导入条数不对");
     var stored = store.ListNotes().Single();
     Check("store.title", stored.Note.Title, "测试纪事");
     Check("store.category", store.CategoryName(stored.Note.CategoryId), "工作");
     Console.WriteLine("[OK] LocalStore 端到端导入成功");
+
+    // 静态加密：notes.json / categories.json 应被加密落盘
+    if (!XNote.Core.Storage.MediaCryptor.IsEncrypted(storePaths.NotesFile)) return Fail("notes.json 未加密");
+    if (!XNote.Core.Storage.MediaCryptor.IsEncrypted(storePaths.CategoriesFile)) return Fail("categories.json 未加密");
+    Console.WriteLine("[OK] notes.json / categories.json 已加密落盘 (XNW1)");
+
+    // 重新打开同目录：能解密读回（证明 decrypt-on-load）
+    var reopened = new LocalStore(storePaths).ListNotes().Single();
+    Check("reopen.title", reopened.Note.Title, "测试纪事");
+    Console.WriteLine("[OK] 重开数据目录解密读回成功");
 
     // 静态加密：落盘媒体应被 DPAPI 加密，但解密读回与原图一致
     var storedImg = stored.Blocks.First(b => b.Type == BlockType.Image);

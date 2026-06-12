@@ -254,8 +254,9 @@ https://github.com/zoomsdg/Xnote-win/releases/download/<标签>/XNote-win-x64.ex
 - ✅ 纪事列表、搜索（标题/正文）、分类筛选、置顶
 - ✅ 编辑器：标题、分类、置顶、文本 / 图片 / 音频块（增删/上下移）
 - ✅ 音频录制（麦克风 → WAV）与播放（编辑器内 ▶ 播放）
-- ✅ 本地媒体静态加密：媒体以 Windows DPAPI（CurrentUser）加密落盘（`XNW1` 头），
-  显示/播放/导出时按需解密；导出 ZIP 内仍是明文，不影响跨平台互通
+- ✅ 本地数据静态加密：纪事正文（`notes.json`）、分类（`categories.json`）与媒体
+  均以 Windows DPAPI（CurrentUser）加密落盘（`XNW1` 头），读取/显示/播放/导出时按需解密；
+  历史明文数据首次启动自动迁移加密；导出 ZIP 内仍是约定明文，不影响跨平台互通
 - ✅ 分类管理（默认分类不可删、删除分类纪事转“日常”）
 
 尚未实现（后续迭代）：
