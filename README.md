@@ -129,12 +129,60 @@ XNote.sln
 
 ## 构建与运行
 
-需要 [.NET 8 SDK](https://dotnet.microsoft.com/download)。
-
 ```powershell
 dotnet build XNote.sln -c Release
 dotnet run --project src/XNote.App        # 启动桌面应用
 ```
+
+### 运行环境：装哪个 .NET？
+
+- **要改代码 / 自己编译** → 装 **.NET 8 SDK**（含运行时）。
+- **只想运行“依赖框架”版**（体积仅 ~1MB，见下「发布与体积」）→ 装 **.NET 8 桌面运行时**
+  （Windows Desktop Runtime，约 50MB，一次性安装，之后所有 .NET 桌面程序通用）。
+- **运行“自包含”版**（单个 ~68MB 的 exe）→ **无需安装任何 .NET**，双击即用。
+
+#### 安装 .NET 8 桌面运行时
+
+任选一种：
+
+**方式 A：winget（推荐，Win10/11 自带）**
+
+```powershell
+winget install Microsoft.DotNet.DesktopRuntime.8
+```
+
+**方式 B：官网下载安装包**
+
+打开 <https://dotnet.microsoft.com/download/dotnet/8.0> →
+在「**.NET Desktop Runtime 8.x**」一栏下载 **Windows x64 Installer** → 双击安装。
+
+> 只想编译开发的话，把上面换成 `winget install Microsoft.DotNet.SDK.8`，
+> 或在同一页面下载「**SDK 8.x**」安装包（SDK 已包含运行时）。
+
+**验证是否装好**
+
+```powershell
+dotnet --info                      # 列出已安装的 SDK / 运行时
+# 或只看桌面运行时：
+dotnet --list-runtimes             # 应能看到 Microsoft.WindowsDesktop.App 8.x
+```
+
+### 发布与体积
+
+| 方式 | 体积 | 目标电脑要求 | 命令 |
+|------|------|------------|------|
+| 依赖框架（推荐） | ~1 MB | 需装 .NET 8 桌面运行时 | `dotnet publish src/XNote.App -c Release -o publish/fdd` |
+| 自包含单文件+压缩 | ~68 MB | 无需装任何 .NET | 见下 |
+
+```powershell
+# 自包含单文件（拷到任意 Windows 电脑双击即用）
+dotnet publish src/XNote.App -c Release -r win-x64 --self-contained `
+    -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true `
+    -o publish/scf
+```
+
+> 自包含版的 ~68MB 里绝大部分是 .NET 8 运行时 + WPF 框架本身（本应用代码仅约 85KB）。
+> WPF 不支持裁剪（PublishTrimmed），因此自包含体积压不到 ~60MB 以下，属正常现象。
 
 ### 验证跨平台互通
 
