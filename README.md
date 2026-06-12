@@ -199,6 +199,53 @@ dotnet run --project tools/XNote.Verify -- "C:\path\XNote_Export_xxx.zip" 你的
 
 ---
 
+## 发布新版本（Release）
+
+把可双击运行的单文件 exe 发布到 GitHub Releases 供下载。分两步：本地编译 → 网页发布。
+
+### 第一步：本地生成单文件 exe
+
+```powershell
+cd d:\tools\xnote-win
+dotnet publish src\XNote.App -c Release -r win-x64 --self-contained `
+    -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o publish\scf
+```
+
+产物为 `publish\scf\XNote.App.exe`（约 68MB，自包含，目标机无需装 .NET）。
+上传前建议改名为 `XNote-win-x64.exe` 更清晰。
+
+### 第二步：在网页创建 Release
+
+1. 打开仓库 → 右侧 **Releases** → **Draft a new release**。
+2. **Choose a tag**：输入一个**新**标签（如 `v0.1.1`，不能与已有重复）→ 点 *Create new tag … on publish*；Target 保持 `main`。
+3. **Release title**：如 `XNote for Windows v0.1.1`。
+4. **描述框**：写更新说明（支持 Markdown）。
+5. **上传 exe**：把 `XNote-win-x64.exe` 拖进描述框下方的附件区（"Attach binaries …"），等进度条传完。
+6. 勾选 **Set as the latest release**（测试版才勾 *pre-release*）。
+7. 点 **Publish release**。
+
+发布后下载直链固定为：
+
+```
+https://github.com/zoomsdg/Xnote-win/releases/download/<标签>/XNote-win-x64.exe
+```
+
+### 要点
+
+- 每发一版用**新** tag（`v0.1.1` / `v0.2.0` …），不能复用；修小 bug 升末位，加功能升中间位。
+- 附件单文件上限 2GB，且**不占仓库体积**（与 `git push` 的 100MB 限制无关）。
+- 改已发布版本：进该 release 点 **Edit**（铅笔）可补传/删附件、改说明，无需重发。
+- 删 release 不会自动删 tag，tag 需单独删。
+- exe 未签名，用户首次运行遇 SmartScreen 时选「更多信息 → 仍要运行」。
+
+> 命令行替代（已装 [GitHub CLI](https://cli.github.com/)）：
+> ```powershell
+> gh release create v0.1.1 publish\scf\XNote.App.exe#XNote-win-x64.exe `
+>     -t "XNote for Windows v0.1.1" -n "更新说明…"
+> ```
+
+---
+
 ## 当前阶段（内核 + 基础 UI）
 
 已实现：
