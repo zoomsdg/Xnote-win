@@ -265,3 +265,7 @@ https://github.com/zoomsdg/Xnote-win/releases/download/<标签>/XNote-win-x64.ex
 
 > 音频说明：Windows 端录音保存为 `.wav`（无损通用，Android `MediaPlayer` 可直接播放）；
 > 从 Android 导入的 `.m4a` 等音频同样能在本应用播放（走系统编解码器）。
+
+> ⚠️ **备份提醒**：DPAPI 是绑定**当前 Windows 用户**的——如果你重装系统、换电脑或删了用户账户，
+> 这些本地加密文件将无法再解密。所以**重要纪事仍建议用「导出」功能（带密码的 ZIP）另存备份**，
+> 那个才是可跨设备恢复的备份。
