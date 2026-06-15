@@ -9,6 +9,7 @@ public sealed class AppPaths
     public string TempDir => Path.Combine(Root, "temp");
     public string NotesFile => Path.Combine(DataDir, "notes.json");
     public string CategoriesFile => Path.Combine(DataDir, "categories.json");
+    public string NotebooksFile => Path.Combine(DataDir, "tabs.json");
 
     public AppPaths(string? root = null)
     {

@@ -88,8 +88,8 @@ static int RoundTrip()
     // 顺带验证 LocalStore 端到端（独立数据目录）
     var storePaths = new AppPaths(Path.Combine(work, "store"));
     var store = new LocalStore(storePaths);
-    var n = store.Import(zipPath, pwd);
-    if (n != 1) return Fail("LocalStore 导入条数不对");
+    var n = store.Import(zipPath, pwd, LocalStore.DefaultNotebookId);
+    if (n.Added != 1) return Fail("LocalStore 导入条数不对");
     var stored = store.ListNotes().Single();
     Check("store.title", stored.Note.Title, "测试纪事");
     Check("store.category", store.CategoryName(stored.Note.CategoryId), "工作");
@@ -116,10 +116,41 @@ static int RoundTrip()
     var zip2 = Path.Combine(work, "reexport.zip");
     store.ExportAll(pwd, zip2);
     var store2 = new LocalStore(new AppPaths(Path.Combine(work, "store2")));
-    store2.Import(zip2, pwd);
+    store2.Import(zip2, pwd, LocalStore.DefaultNotebookId);
     var img2 = store2.ListNotes().Single().Blocks.First(b => b.Type == BlockType.Image);
     if (!store2.Media.ReadPlain(img2.Url!).SequenceEqual(imgBytes)) return Fail("再导出往返图片不一致");
     Console.WriteLine("[OK] 加密落盘 → 再导出 → 再导入 图片字节一致");
+
+    // ---- 标签页 (tab) + 导入去重 ----
+    var dstore = new LocalStore(new AppPaths(Path.Combine(work, "dedup")));
+
+    // 默认标签页存在
+    if (dstore.Notebooks.All(t => t.Id != LocalStore.DefaultNotebookId)) return Fail("默认标签页缺失");
+
+    // 首次导入到默认 tab → 全部新增
+    var s1 = dstore.Import(zipPath, pwd, LocalStore.DefaultNotebookId);
+    if (s1 is not { Added: 1, Updated: 0, Skipped: 0 }) return Fail($"首次导入应全新增，实际 {s1}");
+    Console.WriteLine("[OK] 首次导入 → 新增");
+
+    // 同一 ZIP 再次导入同一 tab → 全部跳过（ID 去重，无副本）
+    var s2 = dstore.Import(zipPath, pwd, LocalStore.DefaultNotebookId);
+    if (s2 is not { Added: 0, Updated: 0, Skipped: 1 }) return Fail($"重复导入应跳过，实际 {s2}");
+    if (dstore.ListNotes(LocalStore.DefaultNotebookId).Count != 1) return Fail("重复导入产生了副本");
+    Console.WriteLine("[OK] 重复导入同一 tab → 跳过，无副本");
+
+    // 导入到另一个新建 tab → 跨 tab 隔离，正常新增
+    var nb = dstore.CreateNotebook("另一个标签页");
+    var s3 = dstore.Import(zipPath, pwd, nb.Id);
+    if (s3 is not { Added: 1 }) return Fail($"跨 tab 应新增，实际 {s3}");
+    if (dstore.ListNotes(nb.Id).Count != 1) return Fail("跨 tab 导入条数不对");
+    Console.WriteLine("[OK] 导入到新 tab → 跨 tab 隔离新增");
+
+    // 重命名 / 删除标签页（删除后其纪事迁回默认 tab）
+    dstore.RenameNotebook(nb.Id, "改名后");
+    if (dstore.GetNotebook(nb.Id)!.Name != "改名后") return Fail("重命名失败");
+    dstore.DeleteNotebook(nb.Id);
+    if (dstore.GetNotebook(nb.Id) != null) return Fail("删除标签页失败");
+    Console.WriteLine("[OK] 标签页重命名 / 删除（纪事迁回默认 tab）");
 
     try { Directory.Delete(work, true); } catch { }
     Console.WriteLine("\n== 全部通过 ✅ ==");

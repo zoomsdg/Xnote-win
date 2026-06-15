@@ -35,6 +35,13 @@ public sealed class Note
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string Title { get; set; } = "";
     public string CategoryId { get; set; } = "daily";
+
+    /// <summary>所属标签页（tab）。纯本地概念，不进导出 ZIP。历史数据为空时迁移到 "local"。</summary>
+    public string NotebookId { get; set; } = "local";
+
+    /// <summary>导入来源纪事的原始 id，用于去重；本地新建纪事为 null。不进导出 ZIP。</summary>
+    public string? SourceId { get; set; }
+
     public bool IsPinned { get; set; }
     public long CreatedAt { get; set; } = Time.NowMillis();
     public long UpdatedAt { get; set; } = Time.NowMillis();
@@ -63,6 +70,16 @@ public sealed class FullNote
 {
     public Note Note { get; set; } = new();
     public List<NoteBlock> Blocks { get; set; } = new();
+}
+
+/// <summary>标签页（tab / 笔记本）。本地分区层，位于纪事之上。不参与跨平台导出。</summary>
+public sealed class Notebook
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string Name { get; set; } = "";
+    /// <summary>标签条显示顺序。</summary>
+    public int Order { get; set; }
+    public long CreatedAt { get; set; } = Time.NowMillis();
 }
 
 /// <summary>分类（与 Android Category 实体对应）。</summary>
