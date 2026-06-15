@@ -21,9 +21,11 @@
             </DockPanel>
         </Border>
 
-        <!-- 标签条（header-only TabControl：只渲染表头，内容区由下方共享列表复用） -->
+        <!-- 标签条（header-only TabControl：只渲染表头，内容区由下方共享列表复用）。
+             双击重命名 / 右键菜单均在代码后置里处理，避免 Style 内事件导致 BAML connectionId 冲突。 -->
         <TabControl x:Name="Tabs" DockPanel.Dock="Top" BorderThickness="0" Background="#FFF1F4F9"
-                    SelectionChanged="Tabs_SelectionChanged" DisplayMemberPath="Name">
+                    SelectionChanged="Tabs_SelectionChanged" DisplayMemberPath="Name"
+                    MouseDoubleClick="Tab_DoubleClick" PreviewMouseRightButtonUp="Tab_RightClick">
             <TabControl.Template>
                 <ControlTemplate TargetType="TabControl">
                     <TabPanel IsItemsHost="True" Margin="8,4,0,0"/>
@@ -32,16 +34,7 @@
             <TabControl.ItemContainerStyle>
                 <Style TargetType="TabItem">
                     <Setter Property="Padding" Value="10,4"/>
-                    <EventSetter Event="MouseDoubleClick" Handler="Tab_DoubleClick"/>
                     <Setter Property="ToolTip" Value="双击重命名 · 右键管理"/>
-                    <Setter Property="ContextMenu">
-                        <Setter.Value>
-                            <ContextMenu>
-                                <MenuItem Header="重命名" Click="RenameTab_Click"/>
-                                <MenuItem Header="删除标签页" Click="DeleteTab_Click"/>
-                            </ContextMenu>
-                        </Setter.Value>
-                    </Setter>
                 </Style>
             </TabControl.ItemContainerStyle>
         </TabControl>

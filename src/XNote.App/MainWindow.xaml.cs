@@ -56,14 +56,33 @@ public partial class MainWindow : Window
         Refresh();
     }
 
-    private void Tab_DoubleClick(object sender, RoutedEventArgs e)
+    private void Tab_DoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is Notebook nb) RenameTab(nb);
+        if (NotebookFromClick(e.OriginalSource) is { } nb) RenameTab(nb);
     }
 
-    private void RenameTab_Click(object sender, RoutedEventArgs e)
+    private void Tab_RightClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is Notebook nb) RenameTab(nb);
+        if (NotebookFromClick(e.OriginalSource) is not { } nb) return;
+        e.Handled = true;
+
+        var menu = new System.Windows.Controls.ContextMenu();
+        var rename = new System.Windows.Controls.MenuItem { Header = "重命名" };
+        rename.Click += (_, _) => RenameTab(nb);
+        var delete = new System.Windows.Controls.MenuItem { Header = "删除标签页" };
+        delete.Click += (_, _) => DeleteTab(nb);
+        menu.Items.Add(rename);
+        menu.Items.Add(delete);
+        menu.IsOpen = true;
+    }
+
+    /// <summary>从点击命中的可视元素向上找到所属 TabItem，取其 Notebook。</summary>
+    private static Notebook? NotebookFromClick(object source)
+    {
+        var d = source as System.Windows.DependencyObject;
+        while (d != null && d is not System.Windows.Controls.TabItem)
+            d = System.Windows.Media.VisualTreeHelper.GetParent(d);
+        return (d as System.Windows.Controls.TabItem)?.DataContext as Notebook;
     }
 
     private void RenameTab(Notebook nb)
@@ -74,9 +93,8 @@ public partial class MainWindow : Window
         ReloadTabs();
     }
 
-    private void DeleteTab_Click(object sender, RoutedEventArgs e)
+    private void DeleteTab(Notebook nb)
     {
-        if ((sender as FrameworkElement)?.DataContext is not Notebook nb) return;
         if (nb.Id == LocalStore.DefaultNotebookId)
         {
             MessageBox.Show(this, "默认标签页不可删除。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
