@@ -22,9 +22,13 @@ public sealed class LocalStore
 
     private readonly List<FullNote> _notes = new();
     private readonly List<Category> _categories = new();
+    private readonly List<Notebook> _notebooks = new();
 
     /// <summary>不可删除的默认分类固定 id（与 Android 端一致）。</summary>
     public static readonly string[] ProtectedCategoryIds = { "daily", "work", "thoughts" };
+
+    /// <summary>默认标签页固定 id：不可删除、可重命名；历史纪事迁移到此 tab。</summary>
+    public const string DefaultNotebookId = "local";
 
     public LocalStore(AppPaths? paths = null)
     {
@@ -57,6 +61,7 @@ public sealed class LocalStore
     {
         _notes.Clear();
         _categories.Clear();
+        _notebooks.Clear();
 
         if (File.Exists(_paths.NotesFile))
         {
@@ -70,10 +75,28 @@ public sealed class LocalStore
             if (loaded != null) _categories.AddRange(loaded);
         }
 
+        if (File.Exists(_paths.NotebooksFile))
+        {
+            var loaded = JsonSerializer.Deserialize<List<Notebook>>(ReadJson(_paths.NotebooksFile));
+            if (loaded != null) _notebooks.AddRange(loaded);
+        }
+
         EnsureDefaultCategories();
+        EnsureDefaultNotebook();
+
+        // 历史纪事无 NotebookId（或指向已不存在的 tab）→ 迁回默认标签页
+        var migrated = false;
+        foreach (var n in _notes)
+        {
+            if (string.IsNullOrEmpty(n.Note.NotebookId) || _notebooks.All(t => t.Id != n.Note.NotebookId))
+            {
+                n.Note.NotebookId = DefaultNotebookId;
+                migrated = true;
+            }
+        }
 
         // 历史明文数据文件：启动时立即加密迁移
-        if (File.Exists(_paths.NotesFile) && !MediaCryptor.IsEncrypted(_paths.NotesFile)) SaveNotes();
+        if (migrated || (File.Exists(_paths.NotesFile) && !MediaCryptor.IsEncrypted(_paths.NotesFile))) SaveNotes();
         if (File.Exists(_paths.CategoriesFile) && !MediaCryptor.IsEncrypted(_paths.CategoriesFile)) SaveCategories();
     }
 
@@ -88,6 +111,8 @@ public sealed class LocalStore
     private void SaveNotes() => WriteJson(_paths.NotesFile, _notes);
 
     private void SaveCategories() => WriteJson(_paths.CategoriesFile, _categories);
+
+    private void SaveNotebooks() => WriteJson(_paths.NotebooksFile, _notebooks);
 
     private void EnsureDefaultCategories()
     {
@@ -104,6 +129,18 @@ public sealed class LocalStore
         SaveCategories();
     }
 
+    private void EnsureDefaultNotebook()
+    {
+        if (_notebooks.Any(t => t.Id == DefaultNotebookId)) return;
+        // 默认标签页放在最前
+        foreach (var t in _notebooks) t.Order++;
+        _notebooks.Insert(0, new Notebook
+        {
+            Id = DefaultNotebookId, Name = "本地纪事", Order = 0, CreatedAt = Time.NowMillis()
+        });
+        SaveNotebooks();
+    }
+
     // ---------- 查询 ----------
 
     public IReadOnlyList<Category> Categories => _categories;
@@ -112,10 +149,17 @@ public sealed class LocalStore
 
     public string CategoryName(string id) => GetCategory(id)?.Name ?? "";
 
-    /// <summary>记事摘要列表：置顶优先，再按更新时间倒序。可按分类/关键字过滤。</summary>
-    public List<FullNote> ListNotes(string? categoryId = null, string? query = null)
+    /// <summary>标签页列表（按 Order 排序）。</summary>
+    public IReadOnlyList<Notebook> Notebooks => _notebooks.OrderBy(t => t.Order).ToList();
+
+    public Notebook? GetNotebook(string id) => _notebooks.FirstOrDefault(t => t.Id == id);
+
+    /// <summary>记事摘要列表：置顶优先，再按更新时间倒序。可按标签页/分类/关键字过滤。</summary>
+    public List<FullNote> ListNotes(string? notebookId = null, string? categoryId = null, string? query = null)
     {
         IEnumerable<FullNote> q = _notes;
+        if (!string.IsNullOrEmpty(notebookId))
+            q = q.Where(n => n.Note.NotebookId == notebookId);
         if (!string.IsNullOrEmpty(categoryId))
             q = q.Where(n => n.Note.CategoryId == categoryId);
         if (!string.IsNullOrWhiteSpace(query))
@@ -140,7 +184,7 @@ public sealed class LocalStore
 
     // ---------- 记事 CRUD ----------
 
-    public FullNote CreateNote(string title = "无标题")
+    public FullNote CreateNote(string title = "无标题", string notebookId = DefaultNotebookId)
     {
         var now = Time.NowMillis();
         var note = new Note
@@ -148,6 +192,7 @@ public sealed class LocalStore
             Id = Guid.NewGuid().ToString(),
             Title = title,
             CategoryId = "daily",
+            NotebookId = GetNotebook(notebookId) != null ? notebookId : DefaultNotebookId,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -207,6 +252,22 @@ public sealed class LocalStore
     public string ImportMediaFile(string sourcePath, bool isImage)
         => _media.SaveFromFile(sourcePath, isImage);
 
+    /// <summary>单个附件大小上限（50MB）。加密是全内存操作，且附件会整份进导出 ZIP。</summary>
+    public const long MaxAttachmentBytes = 50L * 1024 * 1024;
+
+    /// <summary>
+    /// 把外部任意类型的文件作为「附件」加密存入 media 目录，返回加密文件绝对路径。
+    /// <paramref name="enforceLimit"/> 为 true 时超过 <see cref="MaxAttachmentBytes"/> 直接拒绝；
+    /// 从 ZIP 导入既有附件时传 false——宁可收下也不要丢数据。
+    /// </summary>
+    public string ImportAttachmentFile(string sourcePath, bool enforceLimit = true)
+    {
+        if (enforceLimit && new FileInfo(sourcePath).Length > MaxAttachmentBytes)
+            throw new InvalidOperationException(
+                $"附件超过 {MaxAttachmentBytes / 1024 / 1024}MB 上限，无法挂入。");
+        return _media.SaveFromFile(sourcePath, MediaStore.FilePrefix);
+    }
+
     private void TryDeleteMedia(string? path)
     {
         if (string.IsNullOrEmpty(path)) return;
@@ -252,6 +313,48 @@ public sealed class LocalStore
         SaveNotes();
     }
 
+    // ---------- 标签页 (tab) ----------
+
+    public Notebook CreateNotebook(string name)
+    {
+        var nb = new Notebook
+        {
+            Id = Guid.NewGuid().ToString(),
+            Name = name.Trim(),
+            Order = _notebooks.Count == 0 ? 0 : _notebooks.Max(t => t.Order) + 1,
+            CreatedAt = Time.NowMillis()
+        };
+        _notebooks.Add(nb);
+        SaveNotebooks();
+        return nb;
+    }
+
+    public void RenameNotebook(string id, string name)
+    {
+        var nb = GetNotebook(id);
+        if (nb == null) return;
+        nb.Name = name.Trim();
+        SaveNotebooks();
+    }
+
+    /// <summary>删除标签页：禁止删默认页；其下纪事迁回默认页。</summary>
+    public void DeleteNotebook(string id)
+    {
+        if (id == DefaultNotebookId)
+            throw new InvalidOperationException("默认标签页不可删除");
+        if (GetNotebook(id) == null) return;
+
+        var moved = false;
+        foreach (var n in _notes.Where(n => n.Note.NotebookId == id))
+        {
+            n.Note.NotebookId = DefaultNotebookId;
+            moved = true;
+        }
+        _notebooks.RemoveAll(t => t.Id == id);
+        SaveNotebooks();
+        if (moved) SaveNotes();
+    }
+
     /// <summary>导入分类解析：id 命中 → 名字命中 → 按名字自建 → 回落 daily（与 Android 一致）。</summary>
     private string ResolveImportCategoryId(string importCategoryId, string importCategoryName)
     {
@@ -283,20 +386,35 @@ public sealed class LocalStore
     public void ExportAll(string password, string outputZipPath, IProgress<string>? progress = null)
         => Export(_notes.ToList(), password, outputZipPath, progress);
 
-    /// <summary>导入 ZIP，落盘为本地记事。返回成功导入的条数。</summary>
-    public int Import(string zipPath, string password, IProgress<string>? progress = null)
+    /// <summary>导入结果：新增 / 更新（按时间取新覆盖） / 跳过（重复且不更新）。</summary>
+    public readonly record struct ImportSummary(int Added, int Updated, int Skipped);
+
+    /// <summary>
+    /// 导入 ZIP，落盘到指定标签页 <paramref name="notebookId"/>。在该 tab 内去重：
+    /// ID 优先（SourceId / 本地 Id 命中原始导出 id），内容兜底（标题+正文），命中后按 UpdatedAt 取新。
+    /// </summary>
+    public ImportSummary Import(string zipPath, string password, string notebookId,
+        IProgress<string>? progress = null)
     {
+        if (GetNotebook(notebookId) == null) notebookId = DefaultNotebookId;
+
         var extractDir = Path.Combine(_paths.TempDir, "import_" + Guid.NewGuid().ToString("N"));
         try
         {
             var result = _io.Import(zipPath, password, extractDir, progress);
+            int added = 0, updated = 0, skipped = 0;
             foreach (var imp in result.Notes)
             {
                 progress?.Report($"导入：{(string.IsNullOrWhiteSpace(imp.Title) ? "无标题" : imp.Title)}");
-                SaveImported(imp);
+                switch (SaveImported(imp, notebookId))
+                {
+                    case ImportOutcome.Added: added++; break;
+                    case ImportOutcome.Updated: updated++; break;
+                    case ImportOutcome.Skipped: skipped++; break;
+                }
             }
             SaveNotes();
-            return result.Notes.Count;
+            return new ImportSummary(added, updated, skipped);
         }
         finally
         {
@@ -305,34 +423,105 @@ public sealed class LocalStore
         }
     }
 
-    private void SaveImported(ImportNote imp)
+    private enum ImportOutcome { Added, Updated, Skipped }
+
+    private ImportOutcome SaveImported(ImportNote imp, string notebookId)
     {
-        var categoryId = ResolveImportCategoryId(imp.CategoryId, imp.CategoryName);
+        // 在目标 tab 内查找重复：ID 优先，内容兜底
+        var existing = FindDuplicate(imp, notebookId);
+        if (existing != null)
+        {
+            // 命中重复 → 按 UpdatedAt 取新；非更新即跳过（不落媒体，无孤儿文件）
+            if (imp.UpdatedAt <= existing.Note.UpdatedAt) return ImportOutcome.Skipped;
+
+            foreach (var b in existing.Blocks) TryDeleteMedia(b.Url); // 清旧媒体
+            existing.Note.Title = imp.Title;
+            existing.Note.CategoryId = ResolveImportCategoryId(imp.CategoryId, imp.CategoryName);
+            existing.Note.IsPinned = imp.IsPinned;
+            existing.Note.CreatedAt = imp.CreatedAt;
+            existing.Note.UpdatedAt = imp.UpdatedAt;
+            existing.Note.SourceId = imp.Id;
+            existing.Note.NotebookId = notebookId;
+            existing.Blocks = BuildBlocks(imp, existing.Note.Id);
+            return ImportOutcome.Updated;
+        }
+
         var note = new Note
         {
-            Id = Guid.NewGuid().ToString(), // 新 id，避免与本地冲突
+            Id = Guid.NewGuid().ToString(), // 新本地 id，避免与本地冲突
             Title = imp.Title,
-            CategoryId = categoryId,
+            CategoryId = ResolveImportCategoryId(imp.CategoryId, imp.CategoryName),
+            NotebookId = notebookId,
+            SourceId = imp.Id,
             IsPinned = imp.IsPinned,
             CreatedAt = imp.CreatedAt,
             UpdatedAt = imp.UpdatedAt,
             Version = 1
         };
+        _notes.Add(new FullNote { Note = note, Blocks = BuildBlocks(imp, note.Id) });
+        return ImportOutcome.Added;
+    }
 
+    /// <summary>在目标 tab 内找重复：先按 ID（SourceId / 本地 Id == 导出 id），再按内容键。</summary>
+    private FullNote? FindDuplicate(ImportNote imp, string notebookId)
+    {
+        var inTab = _notes.Where(n => n.Note.NotebookId == notebookId).ToList();
+
+        if (!string.IsNullOrEmpty(imp.Id))
+        {
+            var byId = inTab.FirstOrDefault(n => n.Note.SourceId == imp.Id || n.Note.Id == imp.Id);
+            if (byId != null) return byId;
+        }
+
+        var key = ContentKey(imp.Title, imp.Blocks.Where(b => b.Type == BlockType.Text)
+                                                  .OrderBy(b => b.Order).Select(b => b.Text));
+        return inTab.FirstOrDefault(n => ContentKey(n.Note.Title,
+            n.Blocks.Where(b => b.Type == BlockType.Text).OrderBy(b => b.Order).Select(b => b.Text)) == key);
+    }
+
+    private static string ContentKey(string? title, IEnumerable<string?> texts) =>
+        (title ?? "").Trim() + "\n" + string.Join("\n", texts.Select(t => (t ?? "").Trim()));
+
+    private List<NoteBlock> BuildBlocks(ImportNote imp, string noteId)
+    {
         var blocks = new List<NoteBlock>(imp.Blocks.Count);
         foreach (var ib in imp.Blocks.OrderBy(b => b.Order))
         {
             string? url = null;
-            if (ib.Type is BlockType.Image or BlockType.Audio
-                && ib.MediaFilePath != null && File.Exists(ib.MediaFilePath))
+            long? size = null;
+            var hasFile = ib.MediaFilePath != null && File.Exists(ib.MediaFilePath);
+
+            if (ib.Type is BlockType.Image or BlockType.Audio && hasFile)
             {
-                url = ImportMediaFile(ib.MediaFilePath, ib.Type == BlockType.Image);
+                url = ImportMediaFile(ib.MediaFilePath!, ib.Type == BlockType.Image);
+            }
+            else if (ib.Type == BlockType.File && hasFile)
+            {
+                // 已有附件从 ZIP 收回：不卡大小上限，避免导入丢数据
+                size = new FileInfo(ib.MediaFilePath!).Length;
+                url = ImportAttachmentFile(ib.MediaFilePath!, enforceLimit: false);
+            }
+
+            // 附件文件丢失 → 退化成文本块，至少留下痕迹，不留空壳
+            if (ib.Type == BlockType.File && url == null)
+            {
+                blocks.Add(new NoteBlock
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    NoteId = noteId,
+                    Type = BlockType.Text,
+                    Order = ib.Order,
+                    Text = $"[附件丢失] {ib.Alt ?? ""}".TrimEnd(),
+                    CreatedAt = imp.CreatedAt,
+                    UpdatedAt = imp.UpdatedAt
+                });
+                continue;
             }
 
             blocks.Add(new NoteBlock
             {
                 Id = Guid.NewGuid().ToString(),
-                NoteId = note.Id,
+                NoteId = noteId,
                 Type = ib.Type,
                 Order = ib.Order,
                 Text = ib.Type == BlockType.Text ? ib.Text : null,
@@ -341,11 +530,11 @@ public sealed class LocalStore
                 Width = ib.Width,
                 Height = ib.Height,
                 Duration = ib.Duration,
+                Size = size,
                 CreatedAt = imp.CreatedAt,
                 UpdatedAt = imp.UpdatedAt
             });
         }
-
-        _notes.Add(new FullNote { Note = note, Blocks = blocks });
+        return blocks;
     }
 }

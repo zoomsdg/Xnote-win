@@ -10,12 +10,101 @@ namespace XNote.App;
 public partial class MainWindow : Window
 {
     private readonly LocalStore _store = new();
+    private string _currentNotebookId = LocalStore.DefaultNotebookId;
+    private bool _suppressTabEvent;
 
     public MainWindow()
     {
         InitializeComponent();
         MediaAccess.Store = _store.Media; // 注入加密媒体访问点
+        ReloadTabs();
         ReloadCategories();
+        Refresh();
+    }
+
+    // ---------- 标签页 (tab) ----------
+
+    private void ReloadTabs()
+    {
+        _suppressTabEvent = true;
+        Tabs.ItemsSource = _store.Notebooks;
+        // 保持当前选中；不存在则回落到第一个
+        var match = _store.Notebooks.FirstOrDefault(t => t.Id == _currentNotebookId)
+                    ?? _store.Notebooks.FirstOrDefault();
+        _currentNotebookId = match?.Id ?? LocalStore.DefaultNotebookId;
+        Tabs.SelectedItem = match;
+        _suppressTabEvent = false;
+    }
+
+    private void Tabs_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressTabEvent) return;
+        if (Tabs.SelectedItem is Notebook nb)
+        {
+            _currentNotebookId = nb.Id;
+            Refresh();
+        }
+    }
+
+    private void NewTab_Click(object sender, RoutedEventArgs e)
+    {
+        var name = InputDialog.Ask(this, "新建标签页", "标签页名称：");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var nb = _store.CreateNotebook(name);
+        _currentNotebookId = nb.Id;
+        ReloadTabs();
+        Refresh();
+    }
+
+    private void Tab_DoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (NotebookFromClick(e.OriginalSource) is { } nb) RenameTab(nb);
+    }
+
+    private void Tab_RightClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (NotebookFromClick(e.OriginalSource) is not { } nb) return;
+        e.Handled = true;
+
+        var menu = new System.Windows.Controls.ContextMenu();
+        var rename = new System.Windows.Controls.MenuItem { Header = "重命名" };
+        rename.Click += (_, _) => RenameTab(nb);
+        var delete = new System.Windows.Controls.MenuItem { Header = "删除标签页" };
+        delete.Click += (_, _) => DeleteTab(nb);
+        menu.Items.Add(rename);
+        menu.Items.Add(delete);
+        menu.IsOpen = true;
+    }
+
+    /// <summary>从点击命中的可视元素向上找到所属 TabItem，取其 Notebook。</summary>
+    private static Notebook? NotebookFromClick(object source)
+    {
+        var d = source as System.Windows.DependencyObject;
+        while (d != null && d is not System.Windows.Controls.TabItem)
+            d = System.Windows.Media.VisualTreeHelper.GetParent(d);
+        return (d as System.Windows.Controls.TabItem)?.DataContext as Notebook;
+    }
+
+    private void RenameTab(Notebook nb)
+    {
+        var name = InputDialog.Ask(this, "重命名标签页", "标签页名称：", nb.Name);
+        if (string.IsNullOrWhiteSpace(name) || name == nb.Name) return;
+        _store.RenameNotebook(nb.Id, name);
+        ReloadTabs();
+    }
+
+    private void DeleteTab(Notebook nb)
+    {
+        if (nb.Id == LocalStore.DefaultNotebookId)
+        {
+            MessageBox.Show(this, "默认标签页不可删除。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (MessageBox.Show(this, $"删除标签页「{nb.Name}」？其下纪事会移到「本地纪事」。", "删除标签页",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        _store.DeleteNotebook(nb.Id);
+        if (_currentNotebookId == nb.Id) _currentNotebookId = LocalStore.DefaultNotebookId;
+        ReloadTabs();
         Refresh();
     }
 
@@ -34,7 +123,7 @@ public partial class MainWindow : Window
 
     private void Refresh()
     {
-        var rows = _store.ListNotes(CurrentCategoryFilter, SearchBox.Text)
+        var rows = _store.ListNotes(_currentNotebookId, CurrentCategoryFilter, SearchBox.Text)
                          .Select(f => new NoteRowVM(f, _store.CategoryName(f.Note.CategoryId)))
                          .ToList();
         NoteList.ItemsSource = rows;
@@ -49,7 +138,7 @@ public partial class MainWindow : Window
 
     private void New_Click(object sender, RoutedEventArgs e)
     {
-        var note = _store.CreateNote();
+        var note = _store.CreateNote(notebookId: _currentNotebookId);
         ReloadCategories();
         Refresh();
         OpenEditor(note.Note.Id);
@@ -60,24 +149,47 @@ public partial class MainWindow : Window
         var dlg = new OpenFileDialog { Filter = "XNote 加密备份 (*.zip)|*.zip|所有文件|*.*", Title = "选择要导入的 ZIP" };
         if (dlg.ShowDialog(this) != true) return;
 
+        // 选择导入目标标签页：新建 or 现有
+        var target = ImportTargetWindow.Ask(this, _store.Notebooks);
+        if (target == null) return;
+
         var pwd = PasswordDialog.AskOnce(this);
         if (pwd == null) return;
 
+        // 密码确认后再建新标签页，避免取消时残留空标签页
+        var notebookId = target.IsNew ? _store.CreateNotebook(target.NewName!).Id : target.ExistingId!;
+
         try
         {
-            var n = _store.Import(dlg.FileName, pwd);
+            var sum = _store.Import(dlg.FileName, pwd, notebookId);
+            _currentNotebookId = notebookId;
+            ReloadTabs();
             ReloadCategories();
             Refresh();
-            MessageBox.Show(this, $"成功导入 {n} 条纪事。", "导入完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this,
+                $"导入完成：新增 {sum.Added} 条，更新 {sum.Updated} 条，跳过 {sum.Skipped} 条。",
+                "导入完成", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (XNote.Core.ImportExport.InvalidPasswordException)
         {
+            CleanupEmptyNewTab(target, notebookId);
             MessageBox.Show(this, "密码错误，无法解密该文件。", "导入失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch (System.Exception ex)
         {
+            CleanupEmptyNewTab(target, notebookId);
             MessageBox.Show(this, ex.Message, "导入失败", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    /// <summary>导入失败时，删除刚为本次导入新建、但仍为空的标签页。</summary>
+    private void CleanupEmptyNewTab(ImportTargetWindow.Result target, string notebookId)
+    {
+        if (!target.IsNew) return;
+        if (_store.ListNotes(notebookId).Count > 0) return; // 已落入纪事则保留
+        _store.DeleteNotebook(notebookId);
+        if (_currentNotebookId == notebookId) _currentNotebookId = LocalStore.DefaultNotebookId;
+        ReloadTabs();
     }
 
     private void ExportAll_Click(object sender, RoutedEventArgs e)

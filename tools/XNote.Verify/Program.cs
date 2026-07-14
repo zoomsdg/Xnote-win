@@ -34,6 +34,11 @@ static int RoundTrip()
     var imgBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4, 5, 0xFF, 0xD9 };
     File.WriteAllBytes(imgPath, imgBytes);
 
+    // 附件：任意格式文件，本项目不解析内容，只保证加密保存 + 随导出携带
+    var csvPath = Path.Combine(mediaDir, "报表.csv");
+    var csvBytes = System.Text.Encoding.UTF8.GetBytes("日期,金额\n2026-07-13,42.5\n");
+    File.WriteAllBytes(csvPath, csvBytes);
+
     var note = new FullNote
     {
         Note = new Note
@@ -46,6 +51,8 @@ static int RoundTrip()
             new NoteBlock { NoteId = "note-1", Type = BlockType.Text, Order = 0, Text = "你好，世界 🌏" },
             new NoteBlock { NoteId = "note-1", Type = BlockType.Image, Order = 1, Url = imgPath,
                             Alt = "图", Width = 100, Height = 80 },
+            new NoteBlock { NoteId = "note-1", Type = BlockType.File, Order = 2, Url = csvPath,
+                            Alt = "报表.csv", Size = csvBytes.Length },
         }
     };
 
@@ -56,6 +63,18 @@ static int RoundTrip()
     Console.WriteLine($"已导出: {zipPath} ({new FileInfo(zipPath).Length} bytes)");
 
     Inspect(zipPath);
+
+    // 附件在 ZIP 内：放 media/ 且同样受整包 AES-256 保护；notes_data.json 里带兜底文本
+    // （中文在 JSON 里是 \uXXXX 转义，故解析后比对，不做原文匹配）
+    var rawJson = ReadEntryText(zipPath, pwd, ExportImportService.DataEntryName);
+    var rawBlocks = System.Text.Json.JsonSerializer.Deserialize<List<ExportNote>>(rawJson)!
+        .Single().Blocks;
+    var fileBlock = rawBlocks.FirstOrDefault(b => b.Type == "file");
+    if (fileBlock == null) return Fail("导出 JSON 缺少 file 块");
+    Check("json.file.mediaFileName", fileBlock.MediaFileName?.StartsWith("file_"), true);
+    Check("json.file.alt", fileBlock.Alt, "报表.csv");
+    // 兜底：不认识 "file" 的老客户端会把它当文本块显示，不能是空块
+    Check("json.file.text", fileBlock.Text, "[附件] 报表.csv");
 
     // 错误密码必须失败
     try
@@ -76,7 +95,7 @@ static int RoundTrip()
     Check("isPinned", imp.IsPinned, true);
     Check("createdAt", imp.CreatedAt, 1700000000000);
     Check("updatedAt", imp.UpdatedAt, 1700000100000);
-    Check("blockCount", imp.Blocks.Count, 2);
+    Check("blockCount", imp.Blocks.Count, 3);
     Check("textBlock", imp.Blocks[0].Text, "你好，世界 🌏");
     Check("imageAlt", imp.Blocks[1].Alt, "图");
     Check("imageW", imp.Blocks[1].Width, 100);
@@ -85,11 +104,18 @@ static int RoundTrip()
     if (!roundImg.SequenceEqual(imgBytes)) return Fail("图片字节往返不一致");
     Console.WriteLine("[OK] 图片字节往返一致");
 
+    // 附件：类型 / 原文件名 / 老客户端兜底文本 / 字节一致
+    Check("fileType", imp.Blocks[2].Type, BlockType.File);
+    Check("fileName", imp.Blocks[2].Alt, "报表.csv");
+    var roundCsv = File.ReadAllBytes(imp.Blocks[2].MediaFilePath!);
+    if (!roundCsv.SequenceEqual(csvBytes)) return Fail("附件字节往返不一致");
+    Console.WriteLine("[OK] 附件字节往返一致");
+
     // 顺带验证 LocalStore 端到端（独立数据目录）
     var storePaths = new AppPaths(Path.Combine(work, "store"));
     var store = new LocalStore(storePaths);
-    var n = store.Import(zipPath, pwd);
-    if (n != 1) return Fail("LocalStore 导入条数不对");
+    var n = store.Import(zipPath, pwd, LocalStore.DefaultNotebookId);
+    if (n.Added != 1) return Fail("LocalStore 导入条数不对");
     var stored = store.ListNotes().Single();
     Check("store.title", stored.Note.Title, "测试纪事");
     Check("store.category", store.CategoryName(stored.Note.CategoryId), "工作");
@@ -112,14 +138,58 @@ static int RoundTrip()
     if (!store.Media.ReadPlain(storedImg.Url!).SequenceEqual(imgBytes)) return Fail("解密读回与原图不一致");
     Console.WriteLine("[OK] 解密读回与原图一致");
 
-    // 从“加密落盘”再导出 → 新库导入，图片字节仍一致（证明导出会解密成明文写入 ZIP）
+    // 附件同样加密落盘，且原始文件名/大小保留
+    var storedAtt = stored.Blocks.First(b => b.Type == BlockType.File);
+    if (!XNote.Core.Storage.MediaCryptor.IsEncrypted(storedAtt.Url!)) return Fail("落盘附件未加密");
+    Check("store.fileName", storedAtt.Alt, "报表.csv");
+    Check("store.fileSize", storedAtt.Size, (long)csvBytes.Length);
+    if (!store.Media.ReadPlain(storedAtt.Url!).SequenceEqual(csvBytes)) return Fail("附件解密读回不一致");
+    Console.WriteLine("[OK] 附件已加密落盘 (XNW1)，解密读回一致");
+
+    // 从“加密落盘”再导出 → 新库导入，图片/附件字节仍一致（证明导出会解密成明文写入 ZIP）
     var zip2 = Path.Combine(work, "reexport.zip");
     store.ExportAll(pwd, zip2);
     var store2 = new LocalStore(new AppPaths(Path.Combine(work, "store2")));
-    store2.Import(zip2, pwd);
+    store2.Import(zip2, pwd, LocalStore.DefaultNotebookId);
     var img2 = store2.ListNotes().Single().Blocks.First(b => b.Type == BlockType.Image);
     if (!store2.Media.ReadPlain(img2.Url!).SequenceEqual(imgBytes)) return Fail("再导出往返图片不一致");
     Console.WriteLine("[OK] 加密落盘 → 再导出 → 再导入 图片字节一致");
+
+    var att2 = store2.ListNotes().Single().Blocks.First(b => b.Type == BlockType.File);
+    if (!store2.Media.ReadPlain(att2.Url!).SequenceEqual(csvBytes)) return Fail("再导出往返附件不一致");
+    Check("reexport.fileName", att2.Alt, "报表.csv");
+    Console.WriteLine("[OK] 加密落盘 → 再导出 → 再导入 附件字节一致，文件名保留");
+
+    // ---- 标签页 (tab) + 导入去重 ----
+    var dstore = new LocalStore(new AppPaths(Path.Combine(work, "dedup")));
+
+    // 默认标签页存在
+    if (dstore.Notebooks.All(t => t.Id != LocalStore.DefaultNotebookId)) return Fail("默认标签页缺失");
+
+    // 首次导入到默认 tab → 全部新增
+    var s1 = dstore.Import(zipPath, pwd, LocalStore.DefaultNotebookId);
+    if (s1 is not { Added: 1, Updated: 0, Skipped: 0 }) return Fail($"首次导入应全新增，实际 {s1}");
+    Console.WriteLine("[OK] 首次导入 → 新增");
+
+    // 同一 ZIP 再次导入同一 tab → 全部跳过（ID 去重，无副本）
+    var s2 = dstore.Import(zipPath, pwd, LocalStore.DefaultNotebookId);
+    if (s2 is not { Added: 0, Updated: 0, Skipped: 1 }) return Fail($"重复导入应跳过，实际 {s2}");
+    if (dstore.ListNotes(LocalStore.DefaultNotebookId).Count != 1) return Fail("重复导入产生了副本");
+    Console.WriteLine("[OK] 重复导入同一 tab → 跳过，无副本");
+
+    // 导入到另一个新建 tab → 跨 tab 隔离，正常新增
+    var nb = dstore.CreateNotebook("另一个标签页");
+    var s3 = dstore.Import(zipPath, pwd, nb.Id);
+    if (s3 is not { Added: 1 }) return Fail($"跨 tab 应新增，实际 {s3}");
+    if (dstore.ListNotes(nb.Id).Count != 1) return Fail("跨 tab 导入条数不对");
+    Console.WriteLine("[OK] 导入到新 tab → 跨 tab 隔离新增");
+
+    // 重命名 / 删除标签页（删除后其纪事迁回默认 tab）
+    dstore.RenameNotebook(nb.Id, "改名后");
+    if (dstore.GetNotebook(nb.Id)!.Name != "改名后") return Fail("重命名失败");
+    dstore.DeleteNotebook(nb.Id);
+    if (dstore.GetNotebook(nb.Id) != null) return Fail("删除标签页失败");
+    Console.WriteLine("[OK] 标签页重命名 / 删除（纪事迁回默认 tab）");
 
     try { Directory.Delete(work, true); } catch { }
     Console.WriteLine("\n== 全部通过 ✅ ==");
@@ -136,6 +206,15 @@ static int ImportReal(string zip, string pwd)
     foreach (var n in res.Notes)
         Console.WriteLine($"  - [{n.CategoryName}] {n.Title}  ({n.Blocks.Count} 块, pinned={n.IsPinned})");
     return 0;
+}
+
+static string ReadEntryText(string zip, string pwd, string entryName)
+{
+    using var zf = new ZipFile(zip) { Password = pwd };
+    var entry = zf.GetEntry(entryName) ?? throw new InvalidDataException($"ZIP 内缺少 {entryName}");
+    using var s = zf.GetInputStream(entry);
+    using var sr = new StreamReader(s, System.Text.Encoding.UTF8);
+    return sr.ReadToEnd();
 }
 
 static void Inspect(string zip)

@@ -31,14 +31,20 @@ public sealed class ExportNote
 
 public sealed class ExportBlock
 {
-    /// <summary>"text" | "image" | "audio"</summary>
+    /// <summary>
+    /// "text" | "image" | "audio" | "file"。
+    /// "file"（附件）为 Windows 端新增类型，**未新增任何字段**：文件名走 mediaFileName、
+    /// 原始文件名走 alt，并额外填 text（"[附件] 原名"）——不认识 "file" 的老客户端
+    /// 会把它当文本块显示，不至于变成空块。
+    /// </summary>
     [JsonPropertyName("type")] public string Type { get; set; } = "text";
     [JsonPropertyName("order")] public int Order { get; set; }
     [JsonPropertyName("text")] public string? Text { get; set; }
 
-    /// <summary>媒体文件在 ZIP 内 media/ 目录下的文件名（仅 image/audio）。</summary>
+    /// <summary>媒体/附件文件在 ZIP 内 media/ 目录下的文件名（image/audio/file）。</summary>
     [JsonPropertyName("mediaFileName")] public string? MediaFileName { get; set; }
 
+    /// <summary>图片说明；附件块用它存原始文件名。</summary>
     [JsonPropertyName("alt")] public string? Alt { get; set; }
     [JsonPropertyName("width")] public int? Width { get; set; }
     [JsonPropertyName("height")] public int? Height { get; set; }

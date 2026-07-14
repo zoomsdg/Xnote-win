@@ -103,6 +103,35 @@ public sealed class ExportImportService
                             });
                         }
                         break;
+
+                    case BlockType.File:
+                        if (!string.IsNullOrEmpty(b.Url) && File.Exists(b.Url))
+                        {
+                            var name = string.IsNullOrWhiteSpace(b.Alt)
+                                ? Path.GetFileName(b.Url)!
+                                : b.Alt!;
+                            var fileName = $"file_{Guid.NewGuid()}{Path.GetExtension(b.Url)}";
+                            mediaToWrite[fileName] = b.Url!;
+                            blocks.Add(new ExportBlock
+                            {
+                                Type = "file",
+                                Order = b.Order,
+                                // 兜底：不认识 "file" 的客户端把它当文本块，至少看得见附件名
+                                Text = $"[附件] {name}",
+                                MediaFileName = fileName,
+                                Alt = name
+                            });
+                        }
+                        else
+                        {
+                            blocks.Add(new ExportBlock
+                            {
+                                Type = "text",
+                                Order = b.Order,
+                                Text = $"[附件丢失] {b.Alt ?? ""}".TrimEnd()
+                            });
+                        }
+                        break;
                 }
             }
 
@@ -226,7 +255,7 @@ public sealed class ExportImportService
             {
                 var type = BlockTypeJson.FromJson(eb.Type);
                 string? mediaPath = null;
-                if (type is BlockType.Image or BlockType.Audio
+                if (type is BlockType.Image or BlockType.Audio or BlockType.File
                     && !string.IsNullOrEmpty(eb.MediaFileName)
                     && extractedMedia.TryGetValue(Path.GetFileName(eb.MediaFileName!), out var p))
                 {
