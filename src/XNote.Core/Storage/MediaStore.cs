@@ -56,16 +56,26 @@ public sealed class MediaStore
     private readonly AppPaths _paths;
     public MediaStore(AppPaths paths) => _paths = paths;
 
-    public string SaveBytes(byte[] plain, string ext, bool isImage)
+    /// <summary>落盘文件名前缀：image_ / audio_ / file_（附件）。</summary>
+    public const string ImagePrefix = "image";
+    public const string AudioPrefix = "audio";
+    public const string FilePrefix = "file";
+
+    public string SaveBytes(byte[] plain, string ext, string prefix)
     {
-        var prefix = isImage ? "image" : "audio";
         var dest = Path.Combine(_paths.MediaDir, $"{prefix}_{Guid.NewGuid()}{ext}");
         MediaCryptor.EncryptToFile(plain, dest);
         return dest;
     }
 
+    public string SaveBytes(byte[] plain, string ext, bool isImage)
+        => SaveBytes(plain, ext, isImage ? ImagePrefix : AudioPrefix);
+
+    public string SaveFromFile(string sourcePath, string prefix)
+        => SaveBytes(File.ReadAllBytes(sourcePath), Path.GetExtension(sourcePath), prefix);
+
     public string SaveFromFile(string sourcePath, bool isImage)
-        => SaveBytes(File.ReadAllBytes(sourcePath), Path.GetExtension(sourcePath), isImage);
+        => SaveFromFile(sourcePath, isImage ? ImagePrefix : AudioPrefix);
 
     public byte[] ReadPlain(string path) => MediaCryptor.ReadPlain(path);
 
@@ -78,13 +88,37 @@ public sealed class MediaStore
         return tmp;
     }
 
-    /// <summary>启动时清理上次遗留的解密临时文件。</summary>
+    /// <summary>
+    /// 解密到临时目录并**保留原始文件名**（附件交给系统默认程序打开时，标题栏才显示原名）。
+    /// 每次一个独立子目录 open_&lt;guid&gt;，避免同名附件互相覆盖。启动时统一清理。
+    /// </summary>
+    public string DecryptToTempNamed(string path, string originalName)
+    {
+        var name = SafeFileName(originalName);
+        if (name.Length == 0) name = "attachment" + Path.GetExtension(path);
+        var dir = Path.Combine(_paths.TempDir, "open_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var tmp = Path.Combine(dir, name);
+        File.WriteAllBytes(tmp, ReadPlain(path));
+        return tmp;
+    }
+
+    /// <summary>剥掉路径分隔符与非法字符，防止 originalName 逃出临时目录。</summary>
+    private static string SafeFileName(string? name)
+    {
+        var bare = Path.GetFileName(name ?? "").Trim();
+        return string.Concat(bare.Where(c => !Path.GetInvalidFileNameChars().Contains(c)));
+    }
+
+    /// <summary>启动时清理上次遗留的解密临时文件 / 附件打开目录。</summary>
     public void CleanupTemp()
     {
         try
         {
             foreach (var f in Directory.EnumerateFiles(_paths.TempDir, "media_*"))
                 try { File.Delete(f); } catch { /* ignore */ }
+            foreach (var d in Directory.EnumerateDirectories(_paths.TempDir, "open_*"))
+                try { Directory.Delete(d, recursive: true); } catch { /* ignore */ }
         }
         catch { /* ignore */ }
     }

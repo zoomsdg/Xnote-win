@@ -49,6 +49,16 @@ public partial class NoteEditWindow : Window
             SourceId = b.Id, Path = b.Url ?? "", Alt = b.Alt, Width = b.Width, Height = b.Height
         },
         BlockType.Audio => new AudioEditBlockVM { SourceId = b.Id, Path = b.Url ?? "", Duration = b.Duration },
+        BlockType.File => new FileEditBlockVM
+        {
+            SourceId = b.Id,
+            Path = b.Url ?? "",
+            // Alt 存原始文件名；老数据/异常情况回落到落盘文件名
+            FileName = string.IsNullOrWhiteSpace(b.Alt)
+                ? System.IO.Path.GetFileName(b.Url ?? "")
+                : b.Alt!,
+            Size = b.Size
+        },
         _ => new TextEditBlockVM { SourceId = b.Id, Text = b.Text ?? "" }
     };
 
@@ -121,6 +131,84 @@ public partial class NoteEditWindow : Window
         _blocks.Add(new ImageEditBlockVM { Path = stored, Width = w > 0 ? w : null, Height = h > 0 ? h : null });
     }
 
+    // ---------- 附件 ----------
+
+    private void AddFile_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "选择要挂入本纪事的文件",
+            Filter = "所有文件|*.*|表格/文本 (*.csv;*.txt;*.md)|*.csv;*.txt;*.md"
+        };
+        if (dlg.ShowDialog(this) != true) return;
+
+        try
+        {
+            var info = new System.IO.FileInfo(dlg.FileName);
+            var stored = _store.ImportAttachmentFile(dlg.FileName);
+            _blocks.Add(new FileEditBlockVM
+            {
+                Path = stored,
+                FileName = System.IO.Path.GetFileName(dlg.FileName),
+                Size = info.Length
+            });
+        }
+        catch (System.Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "挂入附件失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>解密到临时目录（保留原名）后交给系统默认程序打开——本项目自身不解析附件内容。</summary>
+    private void OpenFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (BlockOf(sender) is not FileEditBlockVM vm || !EnsureExists(vm)) return;
+        try
+        {
+            var tmp = _store.Media.DecryptToTempNamed(vm.Path, vm.FileName);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(tmp)
+            {
+                UseShellExecute = true
+            });
+        }
+        catch (System.Exception ex)
+        {
+            MessageBox.Show(this, "无法打开该附件（本机可能没有关联的程序）：\n" + ex.Message,
+                "打开附件", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void SaveFileAs_Click(object sender, RoutedEventArgs e)
+    {
+        if (BlockOf(sender) is not FileEditBlockVM vm || !EnsureExists(vm)) return;
+
+        var ext = System.IO.Path.GetExtension(vm.FileName);
+        var dlg = new SaveFileDialog
+        {
+            Title = "保存附件到磁盘",
+            FileName = vm.FileName,
+            Filter = string.IsNullOrEmpty(ext) ? "所有文件|*.*" : $"({ext})|*{ext}|所有文件|*.*"
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        try
+        {
+            System.IO.File.WriteAllBytes(dlg.FileName, _store.Media.ReadPlain(vm.Path));
+            MessageBox.Show(this, "已保存到：\n" + dlg.FileName, "保存成功",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (System.Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "保存失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private bool EnsureExists(FileEditBlockVM vm)
+    {
+        if (!string.IsNullOrEmpty(vm.Path) && System.IO.File.Exists(vm.Path)) return true;
+        MessageBox.Show(this, "附件文件缺失。", "附件", MessageBoxButton.OK, MessageBoxImage.Information);
+        return false;
+    }
+
     // ---------- 保存 ----------
 
     private void Save_Click(object sender, RoutedEventArgs e)
@@ -157,6 +245,14 @@ public partial class NoteEditWindow : Window
                         Id = vm.SourceId ?? System.Guid.NewGuid().ToString(),
                         NoteId = _note.Note.Id, Type = BlockType.Audio, Order = order++,
                         Url = au.Path, Duration = au.Duration
+                    });
+                    break;
+                case FileEditBlockVM f:
+                    newBlocks.Add(new NoteBlock
+                    {
+                        Id = vm.SourceId ?? System.Guid.NewGuid().ToString(),
+                        NoteId = _note.Note.Id, Type = BlockType.File, Order = order++,
+                        Url = f.Path, Alt = f.FileName, Size = f.Size
                     });
                     break;
             }

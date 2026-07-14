@@ -84,6 +84,31 @@
                                 </DockPanel>
                             </Border>
                         </DataTemplate>
+                        <!-- 附件块（任意格式文件；本项目不打开其内容，交给系统程序） -->
+                        <DataTemplate DataType="{x:Type local:FileEditBlockVM}">
+                            <Border Margin="2,4" Padding="4" Background="#FFFAFAFA" CornerRadius="4">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right" VerticalAlignment="Top">
+                                        <Button Content="▲" Click="MoveUp_Click" Width="26" MinWidth="26" Padding="0" Margin="1"/>
+                                        <Button Content="▼" Click="MoveDown_Click" Width="26" MinWidth="26" Padding="0" Margin="1"/>
+                                        <Button Content="✕" Click="DeleteBlock_Click" Width="26" MinWidth="26" Padding="0" Margin="1"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Icon}" FontSize="20" VerticalAlignment="Center" Margin="4,0,8,0"/>
+                                        <StackPanel VerticalAlignment="Center" MaxWidth="320">
+                                            <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding FileName}"/>
+                                            <TextBlock Text="{Binding DisplaySize}" FontSize="11"
+                                                       Foreground="{StaticResource Muted}"/>
+                                        </StackPanel>
+                                        <Button Content="打开" Click="OpenFile_Click" Margin="10,0,0,0"
+                                                ToolTip="解密到临时目录，用系统默认程序打开"/>
+                                        <Button Content="另存为" Click="SaveFileAs_Click" Margin="4,0,0,0"
+                                                ToolTip="解密并保存到本机磁盘"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
                     </ItemsControl.Resources>
                 </ItemsControl>
             </ScrollViewer>
@@ -94,6 +119,7 @@
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                 <Button Content="＋ 文本" Click="AddText_Click"/>
                 <Button Content="＋ 图片" Click="AddImage_Click"/>
+                <Button Content="📎 附件" Click="AddFile_Click" ToolTip="挂入任意文件（csv/txt/pdf…），加密保存并随导出携带"/>
                 <Button x:Name="RecordBtn" Content="● 录音" Click="Record_Click"/>
                 <TextBlock x:Name="RecordStatus" Foreground="Red" VerticalAlignment="Center" Margin="8,0,0,0"/>
             </StackPanel>

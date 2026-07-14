@@ -1,14 +1,19 @@
 namespace XNote.Core.Models;
 
 /// <summary>
-/// 内容块类型。序列化到导出 JSON 时用小写字符串 "text"/"image"/"audio"，
+/// 内容块类型。序列化到导出 JSON 时用小写字符串 "text"/"image"/"audio"/"file"，
 /// 与 Android 端 Gson 的 @SerializedName 保持一致。
+///
+/// "file"（附件）是 Windows 端新增的类型：本项目不解析其内容，只负责加密保存、
+/// 随导出 ZIP 携带、交给系统默认程序打开。老客户端不认识该类型时会回落成文本块，
+/// 因此导出时同时写入 text（"[附件] 原文件名"）作为兜底展示。
 /// </summary>
 public enum BlockType
 {
     Text,
     Image,
-    Audio
+    Audio,
+    File
 }
 
 public static class BlockTypeJson
@@ -18,6 +23,7 @@ public static class BlockTypeJson
         BlockType.Text => "text",
         BlockType.Image => "image",
         BlockType.Audio => "audio",
+        BlockType.File => "file",
         _ => "text"
     };
 
@@ -25,6 +31,7 @@ public static class BlockTypeJson
     {
         "image" => BlockType.Image,
         "audio" => BlockType.Audio,
+        "file" => BlockType.File,
         _ => BlockType.Text
     };
 }
@@ -48,7 +55,10 @@ public sealed class Note
     public int Version { get; set; } = 1;
 }
 
-/// <summary>内容块（与 Android NoteBlock 实体对应）。Url 为本地媒体文件绝对路径。</summary>
+/// <summary>
+/// 内容块（与 Android NoteBlock 实体对应）。Url 为本地媒体文件绝对路径。
+/// 附件块（<see cref="BlockType.File"/>）复用 Url（加密后的落盘路径）与 Alt（原始文件名）。
+/// </summary>
 public sealed class NoteBlock
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
@@ -61,6 +71,9 @@ public sealed class NoteBlock
     public long? Duration { get; set; }
     public int? Width { get; set; }
     public int? Height { get; set; }
+
+    /// <summary>附件原始字节数，仅用于本地列表显示。纯本地字段，不进导出 ZIP（导入时按解压出的文件重算）。</summary>
+    public long? Size { get; set; }
     public long CreatedAt { get; set; } = Time.NowMillis();
     public long UpdatedAt { get; set; } = Time.NowMillis();
 }

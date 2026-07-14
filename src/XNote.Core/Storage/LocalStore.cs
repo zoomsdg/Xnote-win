@@ -252,6 +252,22 @@ public sealed class LocalStore
     public string ImportMediaFile(string sourcePath, bool isImage)
         => _media.SaveFromFile(sourcePath, isImage);
 
+    /// <summary>单个附件大小上限（50MB）。加密是全内存操作，且附件会整份进导出 ZIP。</summary>
+    public const long MaxAttachmentBytes = 50L * 1024 * 1024;
+
+    /// <summary>
+    /// 把外部任意类型的文件作为「附件」加密存入 media 目录，返回加密文件绝对路径。
+    /// <paramref name="enforceLimit"/> 为 true 时超过 <see cref="MaxAttachmentBytes"/> 直接拒绝；
+    /// 从 ZIP 导入既有附件时传 false——宁可收下也不要丢数据。
+    /// </summary>
+    public string ImportAttachmentFile(string sourcePath, bool enforceLimit = true)
+    {
+        if (enforceLimit && new FileInfo(sourcePath).Length > MaxAttachmentBytes)
+            throw new InvalidOperationException(
+                $"附件超过 {MaxAttachmentBytes / 1024 / 1024}MB 上限，无法挂入。");
+        return _media.SaveFromFile(sourcePath, MediaStore.FilePrefix);
+    }
+
     private void TryDeleteMedia(string? path)
     {
         if (string.IsNullOrEmpty(path)) return;
@@ -472,10 +488,34 @@ public sealed class LocalStore
         foreach (var ib in imp.Blocks.OrderBy(b => b.Order))
         {
             string? url = null;
-            if (ib.Type is BlockType.Image or BlockType.Audio
-                && ib.MediaFilePath != null && File.Exists(ib.MediaFilePath))
+            long? size = null;
+            var hasFile = ib.MediaFilePath != null && File.Exists(ib.MediaFilePath);
+
+            if (ib.Type is BlockType.Image or BlockType.Audio && hasFile)
             {
-                url = ImportMediaFile(ib.MediaFilePath, ib.Type == BlockType.Image);
+                url = ImportMediaFile(ib.MediaFilePath!, ib.Type == BlockType.Image);
+            }
+            else if (ib.Type == BlockType.File && hasFile)
+            {
+                // 已有附件从 ZIP 收回：不卡大小上限，避免导入丢数据
+                size = new FileInfo(ib.MediaFilePath!).Length;
+                url = ImportAttachmentFile(ib.MediaFilePath!, enforceLimit: false);
+            }
+
+            // 附件文件丢失 → 退化成文本块，至少留下痕迹，不留空壳
+            if (ib.Type == BlockType.File && url == null)
+            {
+                blocks.Add(new NoteBlock
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    NoteId = noteId,
+                    Type = BlockType.Text,
+                    Order = ib.Order,
+                    Text = $"[附件丢失] {ib.Alt ?? ""}".TrimEnd(),
+                    CreatedAt = imp.CreatedAt,
+                    UpdatedAt = imp.UpdatedAt
+                });
+                continue;
             }
 
             blocks.Add(new NoteBlock
@@ -490,6 +530,7 @@ public sealed class LocalStore
                 Width = ib.Width,
                 Height = ib.Height,
                 Duration = ib.Duration,
+                Size = size,
                 CreatedAt = imp.CreatedAt,
                 UpdatedAt = imp.UpdatedAt
             });

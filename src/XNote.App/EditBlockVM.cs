@@ -63,6 +63,39 @@ public sealed class AudioEditBlockVM : EditBlockVM
     }
 }
 
+/// <summary>
+/// 附件块：本项目不解析文件内容，只显示「有这么个文档」，交给系统默认程序打开 / 另存为。
+/// </summary>
+public sealed class FileEditBlockVM : EditBlockVM
+{
+    /// <summary>本地媒体文件绝对路径（已加密，在 media 目录内）。</summary>
+    public string Path { get; init; } = "";
+
+    /// <summary>原始文件名（含扩展名），用于显示、打开与另存为。</summary>
+    public string FileName { get; init; } = "";
+
+    /// <summary>原始字节数；未知时为 null。</summary>
+    public long? Size { get; init; }
+
+    public string Icon => System.IO.Path.GetExtension(FileName).ToLowerInvariant() switch
+    {
+        ".csv" or ".xls" or ".xlsx" => "📊",
+        ".txt" or ".md" or ".log" => "📄",
+        ".pdf" => "📕",
+        ".doc" or ".docx" => "📘",
+        ".zip" or ".rar" or ".7z" => "🗜",
+        _ => "📎"
+    };
+
+    public string DisplaySize => Size switch
+    {
+        null or <= 0 => "",
+        < 1024 => $"{Size} B",
+        < 1024 * 1024 => $"{Size / 1024.0:0.#} KB",
+        _ => $"{Size / 1024.0 / 1024.0:0.#} MB"
+    };
+}
+
 public static class ImageLoader
 {
     /// <summary>
