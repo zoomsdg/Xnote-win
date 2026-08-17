@@ -101,14 +101,32 @@ public partial class NoteEditWindow : Window
     {
         var dlg = new OpenFileDialog
         {
-            Title = "选择图片",
+            Title = "选择图片（可多选）",
+            Multiselect = true,
             Filter = "图片 (*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.gif)|*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.gif|所有文件|*.*"
         };
         if (dlg.ShowDialog(this) != true) return;
 
-        var stored = _store.ImportMediaFile(dlg.FileName, isImage: true);
-        var (w, h) = ImageLoader.Dimensions(stored);
-        _blocks.Add(new ImageEditBlockVM { Path = stored, Width = w > 0 ? w : null, Height = h > 0 ? h : null });
+        // 多选时按文件名排序入库，避免依赖对话框返回顺序
+        var failed = new System.Collections.Generic.List<string>();
+        foreach (var file in dlg.FileNames.OrderBy(f => f, System.StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var stored = _store.ImportMediaFile(file, isImage: true);
+                var (w, h) = ImageLoader.Dimensions(stored);
+                _blocks.Add(new ImageEditBlockVM { Path = stored, Width = w > 0 ? w : null, Height = h > 0 ? h : null });
+            }
+            catch (System.Exception ex)
+            {
+                // 单张失败不打断整批
+                failed.Add($"{System.IO.Path.GetFileName(file)}：{ex.Message}");
+            }
+        }
+
+        if (failed.Count > 0)
+            MessageBox.Show(this, "以下图片未能加入：\n" + string.Join("\n", failed),
+                "添加图片", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     // ---------- 附件 ----------

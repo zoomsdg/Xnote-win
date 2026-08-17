@@ -118,7 +118,7 @@
         <DockPanel Grid.Row="3" Margin="0,10,0,0">
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                 <Button Content="＋ 文本" Click="AddText_Click"/>
-                <Button Content="＋ 图片" Click="AddImage_Click"/>
+                <Button Content="＋ 图片" Click="AddImage_Click" ToolTip="可一次选多张（Ctrl / Shift 多选）"/>
                 <Button Content="📎 附件" Click="AddFile_Click" ToolTip="挂入任意文件（csv/txt/pdf…），加密保存并随导出携带"/>
                 <Button x:Name="RecordBtn" Content="● 录音" Click="Record_Click"/>
                 <TextBlock x:Name="RecordStatus" Foreground="Red" VerticalAlignment="Center" Margin="8,0,0,0"/>
