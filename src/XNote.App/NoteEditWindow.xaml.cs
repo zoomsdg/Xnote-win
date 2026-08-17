@@ -32,7 +32,7 @@ public partial class NoteEditWindow : Window
         CategoryCombo.SelectedValue = note.Note.CategoryId;
 
         foreach (var b in note.Blocks.OrderBy(b => b.Order))
-            _blocks.Add(ToVm(b));
+            _blocks.Add(EditBlockVM.From(b));
         if (_blocks.Count == 0)
             _blocks.Add(new TextEditBlockVM());
 
@@ -41,26 +41,6 @@ public partial class NoteEditWindow : Window
 
     private static string Fmt(long ms) =>
         System.DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime.ToString("yyyy-MM-dd HH:mm");
-
-    private static EditBlockVM ToVm(NoteBlock b) => b.Type switch
-    {
-        BlockType.Image => new ImageEditBlockVM
-        {
-            SourceId = b.Id, Path = b.Url ?? "", Alt = b.Alt, Width = b.Width, Height = b.Height
-        },
-        BlockType.Audio => new AudioEditBlockVM { SourceId = b.Id, Path = b.Url ?? "", Duration = b.Duration },
-        BlockType.File => new FileEditBlockVM
-        {
-            SourceId = b.Id,
-            Path = b.Url ?? "",
-            // Alt 存原始文件名；老数据/异常情况回落到落盘文件名
-            FileName = string.IsNullOrWhiteSpace(b.Alt)
-                ? System.IO.Path.GetFileName(b.Url ?? "")
-                : b.Alt!,
-            Size = b.Size
-        },
-        _ => new TextEditBlockVM { SourceId = b.Id, Text = b.Text ?? "" }
-    };
 
     private void ReloadCategories()
     {
@@ -215,6 +195,14 @@ public partial class NoteEditWindow : Window
     {
         _note.Note.Title = TitleBox.Text.Trim();
         _note.Note.IsPinned = PinCheck.IsChecked == true;
+
+        // 未手动编辑标题时（留空或仍是默认「无标题」），取首个文本块首行的前十个字作为标题
+        if (string.IsNullOrEmpty(_note.Note.Title) || _note.Note.Title == "无标题")
+        {
+            var derived = DeriveTitleFromBlocks();
+            if (!string.IsNullOrEmpty(derived))
+                _note.Note.Title = derived;
+        }
         if (CategoryCombo.SelectedValue is string cid && cid.Length > 0)
             _note.Note.CategoryId = cid;
 
@@ -261,6 +249,26 @@ public partial class NoteEditWindow : Window
 
         _store.SaveNote(_note);
         DialogResult = true;
+    }
+
+    private string DeriveTitleFromBlocks()
+    {
+        foreach (var vm in _blocks)
+        {
+            if (vm is TextEditBlockVM t && !string.IsNullOrWhiteSpace(t.Text))
+            {
+                var firstLine = t.Text
+                    .Replace("\r\n", "\n").Replace('\r', '\n')
+                    .Split('\n')
+                    .FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
+                if (firstLine != null)
+                {
+                    firstLine = firstLine.Trim();
+                    return firstLine.Length > 10 ? firstLine.Substring(0, 10) : firstLine;
+                }
+            }
+        }
+        return "";
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;

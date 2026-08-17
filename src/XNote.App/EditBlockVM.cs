@@ -13,6 +13,27 @@ public abstract class EditBlockVM : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
     protected void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+    /// <summary>把存储层的块映射成对应 VM；编辑窗与主界面详情抽屉共用同一套 VM。</summary>
+    public static EditBlockVM From(NoteBlock b) => b.Type switch
+    {
+        BlockType.Image => new ImageEditBlockVM
+        {
+            SourceId = b.Id, Path = b.Url ?? "", Alt = b.Alt, Width = b.Width, Height = b.Height
+        },
+        BlockType.Audio => new AudioEditBlockVM { SourceId = b.Id, Path = b.Url ?? "", Duration = b.Duration },
+        BlockType.File => new FileEditBlockVM
+        {
+            SourceId = b.Id,
+            Path = b.Url ?? "",
+            // Alt 存原始文件名；老数据/异常情况回落到落盘文件名
+            FileName = string.IsNullOrWhiteSpace(b.Alt)
+                ? System.IO.Path.GetFileName(b.Url ?? "")
+                : b.Alt!,
+            Size = b.Size
+        },
+        _ => new TextEditBlockVM { SourceId = b.Id, Text = b.Text ?? "" }
+    };
 }
 
 public sealed class TextEditBlockVM : EditBlockVM

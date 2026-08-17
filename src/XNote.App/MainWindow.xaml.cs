@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using Microsoft.Win32;
@@ -13,10 +14,18 @@ public partial class MainWindow : Window
     private string _currentNotebookId = LocalStore.DefaultNotebookId;
     private bool _suppressTabEvent;
 
+    // 右侧详情抽屉（只读预览）
+    private readonly ObservableCollection<EditBlockVM> _detailBlocks = new();
+    private readonly Audio.AudioPlaybackService _player = new();
+    private string? _detailNoteId;
+    private bool _suppressListSelection;
+
     public MainWindow()
     {
         InitializeComponent();
         MediaAccess.Store = _store.Media; // 注入加密媒体访问点
+        DetailBlocks.ItemsSource = _detailBlocks;
+        _player.PlayingChanged += OnPlayingChanged;
         ReloadTabs();
         ReloadCategories();
         Refresh();
@@ -123,10 +132,25 @@ public partial class MainWindow : Window
 
     private void Refresh()
     {
+        var keepId = Selected?.Id ?? _detailNoteId;
         var rows = _store.ListNotes(_currentNotebookId, CurrentCategoryFilter, SearchBox.Text)
                          .Select(f => new NoteRowVM(f, _store.CategoryName(f.Note.CategoryId)))
                          .ToList();
+
+        // 换 ItemsSource 会先把选中项清空，抖动出一次 SelectionChanged —— 先屏蔽，再自己恢复选中
+        _suppressListSelection = true;
         NoteList.ItemsSource = rows;
+        var keep = keepId == null ? null : rows.FirstOrDefault(r => r.Id == keepId);
+        NoteList.SelectedItem = keep;
+        _suppressListSelection = false;
+
+        // 抽屉开着时同步最新内容；对应纪事已不在当前视图（删除/换 tab/被过滤）则收起
+        if (_detailNoteId != null)
+        {
+            if (keep != null) ShowDetail(keep, force: true);
+            else CloseDetail();
+        }
+
         StatusText.Text = $"共 {rows.Count} 条纪事";
     }
 
@@ -245,6 +269,31 @@ public partial class MainWindow : Window
         if (Selected != null) OpenEditor(Selected.Id);
     }
 
+    /// <summary>键盘上下键换选时也跟随预览。</summary>
+    private void NoteList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressListSelection) return;
+        if (Selected is { } row) ShowDetail(row);
+    }
+
+    /// <summary>
+    /// 单击行 = 打开详情抽屉。走点击而非只靠 SelectionChanged：抽屉被 ✕ 关掉后，
+    /// 再点同一行不会触发选中变化，仍需要能重新打开。
+    /// </summary>
+    private void NoteList_ClickUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (RowFromClick(e.OriginalSource) is { } row) ShowDetail(row);
+    }
+
+    /// <summary>从点击命中的可视元素向上找到所属 ListBoxItem，取其行 VM。</summary>
+    private static NoteRowVM? RowFromClick(object source)
+    {
+        var d = source as System.Windows.DependencyObject;
+        while (d != null && d is not System.Windows.Controls.ListBoxItem)
+            d = System.Windows.Media.VisualTreeHelper.GetParent(d);
+        return (d as System.Windows.Controls.ListBoxItem)?.DataContext as NoteRowVM;
+    }
+
     private void Edit_Click(object sender, RoutedEventArgs e)
     {
         if (Selected != null) OpenEditor(Selected.Id);
@@ -274,5 +323,123 @@ public partial class MainWindow : Window
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _store.DeleteNote(Selected.Id);
         Refresh();
+    }
+
+    // ---------- 详情抽屉（只读） ----------
+
+    /// <param name="force">true = 即使是同一条也重建内容（列表刷新后同步最新数据）。</param>
+    private void ShowDetail(NoteRowVM row, bool force = false)
+    {
+        if (!force && _detailNoteId == row.Id && DetailDrawer.Visibility == Visibility.Visible) return;
+
+        _player.Stop(); // 切换纪事时停掉上一条的音频
+        _detailNoteId = row.Id;
+
+        DetailTitle.Text = row.Title;
+        DetailPin.Visibility = row.PinVisibility;
+        DetailCategory.Text = row.CategoryName;
+        DetailTime.Text = row.DateText;
+
+        _detailBlocks.Clear();
+        foreach (var b in row.Full.Blocks.OrderBy(b => b.Order))
+            _detailBlocks.Add(EditBlockVM.From(b));
+        DetailEmpty.Visibility = _detailBlocks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        DetailDrawer.Visibility = Visibility.Visible;
+        DetailScroll.ScrollToTop();
+    }
+
+    private void CloseDetail()
+    {
+        _player.Stop();
+        _detailNoteId = null;
+        _detailBlocks.Clear();
+        DetailDrawer.Visibility = Visibility.Collapsed;
+    }
+
+    private void CloseDetail_Click(object sender, RoutedEventArgs e) => CloseDetail();
+
+    private EditBlockVM? DetailBlockOf(object sender) => (sender as FrameworkElement)?.DataContext as EditBlockVM;
+
+    private void DetailViewImage_Click(object sender, RoutedEventArgs e)
+    {
+        if (DetailBlockOf(sender) is not ImageEditBlockVM vm) return;
+        if (string.IsNullOrEmpty(vm.Path) || !System.IO.File.Exists(vm.Path))
+        {
+            MessageBox.Show(this, "图片文件缺失。", "查看", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        new ImageViewerWindow(vm.Path) { Owner = this }.ShowDialog();
+    }
+
+    private void DetailPlayAudio_Click(object sender, RoutedEventArgs e)
+    {
+        if (DetailBlockOf(sender) is not AudioEditBlockVM vm) return;
+        if (string.IsNullOrEmpty(vm.Path) || !System.IO.File.Exists(vm.Path))
+        {
+            MessageBox.Show(this, "音频文件缺失。", "播放", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        _player.Toggle(vm.Path);
+    }
+
+    private void OnPlayingChanged(string? path)
+    {
+        foreach (var vm in _detailBlocks.OfType<AudioEditBlockVM>())
+            if (vm.Path == path)
+                vm.IsPlaying = _player.CurrentPath == path;
+    }
+
+    /// <summary>解密到临时目录（保留原名）后交给系统默认程序打开——本项目自身不解析附件内容。</summary>
+    private void DetailOpenFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (DetailBlockOf(sender) is not FileEditBlockVM vm || !EnsureAttachmentExists(vm)) return;
+        try
+        {
+            var tmp = _store.Media.DecryptToTempNamed(vm.Path, vm.FileName);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(tmp) { UseShellExecute = true });
+        }
+        catch (System.Exception ex)
+        {
+            MessageBox.Show(this, "无法打开该附件（本机可能没有关联的程序）：\n" + ex.Message,
+                "打开附件", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void DetailSaveFileAs_Click(object sender, RoutedEventArgs e)
+    {
+        if (DetailBlockOf(sender) is not FileEditBlockVM vm || !EnsureAttachmentExists(vm)) return;
+
+        var ext = System.IO.Path.GetExtension(vm.FileName);
+        var dlg = new SaveFileDialog
+        {
+            Title = "保存附件到磁盘",
+            FileName = vm.FileName,
+            Filter = string.IsNullOrEmpty(ext) ? "所有文件|*.*" : $"({ext})|*{ext}|所有文件|*.*"
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        try
+        {
+            System.IO.File.WriteAllBytes(dlg.FileName, _store.Media.ReadPlain(vm.Path));
+            MessageBox.Show(this, "已保存到：\n" + dlg.FileName, "保存成功",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (System.Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "保存失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private bool EnsureAttachmentExists(FileEditBlockVM vm)
+    {
+        if (!string.IsNullOrEmpty(vm.Path) && System.IO.File.Exists(vm.Path)) return true;
+        MessageBox.Show(this, "附件文件缺失。", "附件", MessageBoxButton.OK, MessageBoxImage.Information);
+        return false;
+    }
+
+    protected override void OnClosed(System.EventArgs e)
+    {
+        _player.Stop();
+        base.OnClosed(e);
     }
 }
